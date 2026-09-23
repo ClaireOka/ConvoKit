@@ -4,11 +4,10 @@ Shared helpers for the ConvoKit AI classes.
 On disk, AI fields live inside the regular ConvoKit metadata so that a dumped
 ConvoKit AI corpus remains a valid ConvoKit corpus:
 
-- speaker meta:      "ai_meta", "is_ai"
-- utterance meta:    "ai_meta"
-- conversation meta: "ai_meta" (may contain "supports", "assistants", "alias")
-- corpus meta:       "ai_meta" (contains "assistants"), "has_ai", "supports"
-- supports.json:     {"supports": [...]}
+- speaker meta:      "is_ai", "ai_meta" ({"config", "role"})
+- utterance meta:    "ai_meta" ({"config", "supports"})
+- conversation meta: "ai_meta" ({"alias", "assistants", "supports"})
+- corpus meta:       "has_ai", "ai_meta"
 
 In memory, these fields are pulled out of .meta and exposed as attributes.
 """
@@ -20,8 +19,11 @@ AI_META_KEYS = {
     "speaker": ("ai_meta", "is_ai"),
     "utterance": ("ai_meta",),
     "conversation": ("ai_meta",),
-    "corpus": ("ai_meta", "has_ai", "supports", "assistants"),
+    "corpus": ("ai_meta", "has_ai"),
 }
+
+# corpus meta keys from earlier iterations of the format, migrated onto conversations on load
+LEGACY_CORPUS_KEYS = ("supports", "assistants")
 
 # keys from earlier iterations of the format that are dropped on load
 LEGACY_AI_KEYS = ("ai_meta", "is_ai", "has_ai", "role", "sender_name", "agent_id")

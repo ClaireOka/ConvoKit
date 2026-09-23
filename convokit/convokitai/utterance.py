@@ -1,8 +1,9 @@
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from convokit.model import Utterance as BaseUtterance
 from .aiUtil import AI_META_KEYS, LEGACY_AI_KEYS, as_dict, split_ai_fields
 from .speaker import Speaker
+from .support import Support
 
 
 class Utterance(BaseUtterance):
@@ -11,12 +12,17 @@ class Utterance(BaseUtterance):
 
     Takes the same arguments as convokit.Utterance, plus:
 
-    :param ai_meta: dictionary of AI-specific attributes of the utterance (e.g. generation parameters)
+    :param ai_meta: additional outputs from the speaker LLM call for this message (empty if there are none
+        or the speaker is not an agent). Recognized keys:
+
+        - "config": dict configuration used to generate the message
+        - "supports": list of Supports attached to this utterance
 
     If `meta` contains an "ai_meta" entry (as in a dumped corpus) and `ai_meta` is not given,
     it is moved out of `meta` into the attribute.
 
-    :ivar ai_meta: AI-specific attributes of the utterance. Assigning replaces the existing ai_meta.
+    :ivar ai_meta: AI metadata of the utterance. Assigning replaces the existing ai_meta.
+    :ivar supports: the Supports attached to this utterance
     """
 
     def __init__(
@@ -51,7 +57,7 @@ class Utterance(BaseUtterance):
         Metadata deletion must be unlocked by the caller if the utterance has an owner.
         """
         utt.__class__ = cls
-        utt._ai_meta = as_dict(utt.meta.get("ai_meta"))
+        utt.ai_meta = as_dict(utt.meta.get("ai_meta"))
         for key in set(LEGACY_AI_KEYS) | set(AI_META_KEYS["utterance"]):
             if key in utt.meta:
                 del utt.meta[key]
@@ -63,4 +69,15 @@ class Utterance(BaseUtterance):
 
     @ai_meta.setter
     def ai_meta(self, value):
-        self._ai_meta = value or {}
+        value = dict(value or {})
+        if "supports" in value:
+            value["supports"] = Support.normalize_list(value["supports"])
+        self._ai_meta = value
+
+    @property
+    def supports(self) -> List[Support]:
+        return Support.normalize_list(self.ai_meta.get("supports", []))
+
+    @supports.setter
+    def supports(self, value):
+        self.ai_meta = {**self.ai_meta, "supports": value}

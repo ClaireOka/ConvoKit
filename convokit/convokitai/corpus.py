@@ -1,4 +1,4 @@
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, Generator, List, Optional
 
 from pandas import DataFrame
 
@@ -7,10 +7,8 @@ from .aiUtil import as_dict, split_ai_fields
 from .assistant import Assistant
 from .conversation import Conversation
 from .corpus_helpers import (
-    distribute_supports_to_conversations,
-    dump_supports,
     extract_corpus_ai_fields,
-    get_dump_dirpath,
+    migrate_legacy_assistants_and_supports,
     stash_ai_fields_in_meta,
     unstash_ai_fields_from_meta,
     upgrade_components,
@@ -27,15 +25,15 @@ class Corpus(BaseCorpus):
 
     Takes the same arguments as convokit.Corpus (passed through as keyword arguments), plus:
 
-    :param has_ai: whether the corpus involves AI. If loading from a folder and not given, the stored value is used.
-    :param assistants: dictionary of assistant id -> Assistant (or its dict form)
-    :param supports: list of Supports (or their dict forms)
+    :param has_ai: True if there are AI speakers in the corpus. If neither given nor stored in a loaded
+        corpus, it is computed from whether any Speaker has is_ai set.
     :param meta: initial corpus-level metadata
 
-    :ivar has_ai: whether the corpus involves AI
-    :ivar ai_meta: AI-specific attributes of the corpus. Assigning a dict merges it into the existing ai_meta.
-    :ivar assistants: dictionary of assistant id -> Assistant
-    :ivar supports: list of all Supports in the corpus
+    :ivar has_ai: True if there are AI speakers in the corpus
+    :ivar ai_meta: metadata for ConvoKitAI. Assigning a dict merges it into the existing ai_meta.
+
+    Assistants and Supports belong to Conversations (see Conversation.ai_meta); iter_assistants() and
+    iter_supports() iterate over them across the whole corpus.
     """
 
     def __init__(
@@ -43,8 +41,6 @@ class Corpus(BaseCorpus):
         filename: Optional[str] = None,
         utterances: Optional[List[Utterance]] = None,
         has_ai: Optional[bool] = None,
-        assistants: Optional[Dict] = None,
-        supports: Optional[List] = None,
         meta: Optional[Dict] = None,
         **kwargs,
     ):
@@ -54,27 +50,23 @@ class Corpus(BaseCorpus):
             self.meta.update(split_ai_fields(meta, "corpus")[0])
         if has_ai is not None:
             self.has_ai = has_ai
-        if assistants is not None:
-            self.assistants = assistants
-        if supports is not None:
-            self.supports = supports
-            distribute_supports_to_conversations(self, self.supports)
 
     def _init_ai_fields(self, filename: Optional[str] = None) -> None:
         """
         Convert all components to convokitai objects and move the corpus-level AI fields out of
-        corpus.meta (and supports.json, if loading from a folder) into attributes.
+        corpus.meta into attributes. Corpus-level assistants / supports from earlier iterations of
+        the format are moved onto their conversations.
         """
-        self._has_ai = False
+        self._has_ai = None
         self._ai_meta = {}
-        self._supports = []
         upgrade_components(self)
         fields = extract_corpus_ai_fields(self, filename)
         self.ai_meta = fields["ai_meta"]
-        self.has_ai = fields["has_ai"]
-        self.assistants = fields["assistants"]
-        self.supports = fields["supports"]
-        distribute_supports_to_conversations(self, self.supports)
+        if fields["has_ai"] is not None:
+            self.has_ai = fields["has_ai"]
+        migrate_legacy_assistants_and_supports(
+            self, fields["legacy_assistants"], fields["legacy_supports"]
+        )
 
     @classmethod
     def load(cls, filename: str, **kwargs) -> "Corpus":
@@ -109,7 +101,10 @@ class Corpus(BaseCorpus):
 
     @property
     def has_ai(self) -> bool:
-        return getattr(self, "_has_ai", False)
+        has_ai = getattr(self, "_has_ai", None)
+        if has_ai is None:
+            return any(speaker.is_ai for speaker in getattr(self, "speakers", {}).values())
+        return has_ai
 
     @has_ai.setter
     def has_ai(self, value):
@@ -126,26 +121,37 @@ class Corpus(BaseCorpus):
         else:
             self._ai_meta = {}
 
-    @property
-    def supports(self) -> List[Support]:
-        return list(getattr(self, "_supports", []))
+    def iter_assistants(
+        self, selector: Callable[[Assistant], bool] = lambda assistant: True
+    ) -> Generator[Assistant, None, None]:
+        """
+        Get the Assistants of all Conversations in the Corpus, with an optional selector that filters
+        for Assistants that should be included.
+        """
+        for convo in self.iter_conversations():
+            for assistant in convo.assistants:
+                if selector(assistant):
+                    yield assistant
 
-    @supports.setter
-    def supports(self, value):
-        self._supports = Support.normalize_list(value)
+    def get_assistant(self, assistant_id: str) -> Assistant:
+        """
+        Get the Assistant with the specified id. Raises a KeyError if there is no such assistant.
+        """
+        for assistant in self.iter_assistants(lambda a: a.id == assistant_id):
+            return assistant
+        raise KeyError(assistant_id)
 
-    @property
-    def assistants(self) -> Dict[str, Assistant]:
-        raw_assistants = as_dict(self.ai_meta.get("assistants"))
-        return {
-            k: Assistant.from_dict(v) if isinstance(v, dict) else v
-            for k, v in raw_assistants.items()
-        }
-
-    @assistants.setter
-    def assistants(self, value):
-        payload = {k: v.to_dict() if isinstance(v, Assistant) else v for k, v in (value or {}).items()}
-        self.ai_meta = {"assistants": payload}
+    def iter_supports(
+        self, selector: Callable[[Support], bool] = lambda support: True
+    ) -> Generator[Support, None, None]:
+        """
+        Get the Supports of all Conversations in the Corpus, with an optional selector that filters
+        for Supports that should be included.
+        """
+        for convo in self.iter_conversations():
+            for support in convo.supports:
+                if selector(support):
+                    yield support
 
     def _inherit_ai_fields(self, *sources: "Corpus", conversations: bool = True) -> None:
         """
@@ -155,12 +161,9 @@ class Corpus(BaseCorpus):
         for source in sources:
             if not isinstance(source, Corpus):
                 continue
-            assistants = {**self.assistants, **source.assistants}
             self.ai_meta = source.ai_meta
-            self.assistants = assistants
-            self.has_ai = self.has_ai or source.has_ai
-            seen = {support.id for support in self.supports}
-            self.supports = self.supports + [s for s in source.supports if s.id not in seen]
+            if getattr(source, "_has_ai", None) is not None:
+                self.has_ai = self.has_ai or source.has_ai
             if conversations:
                 for convo in self.iter_conversations():
                     if source.has_conversation(convo.id):
@@ -181,8 +184,8 @@ class Corpus(BaseCorpus):
         fields_to_skip=None,
     ) -> None:
         """
-        Dumps the corpus, its metadata, and its AI fields to disk. The result is a valid convokit
-        corpus folder with an additional supports.json file. See convokit.Corpus.dump for parameters.
+        Dumps the corpus, its metadata, and its AI fields to disk. The AI fields are stored in the
+        metadata, so the result is a valid convokit corpus folder. See convokit.Corpus.dump for parameters.
         """
         upgrade_components(self)
         stash_ai_fields_in_meta(self)
@@ -194,10 +197,6 @@ class Corpus(BaseCorpus):
                 force_version=force_version,
                 overwrite_existing_corpus=overwrite_existing_corpus,
                 fields_to_skip=fields_to_skip,
-            )
-            dump_supports(
-                self.supports,
-                get_dump_dirpath(self, name, base_path, overwrite_existing_corpus),
             )
         finally:
             unstash_ai_fields_from_meta(self)
@@ -266,5 +265,5 @@ class Corpus(BaseCorpus):
         """
         super().print_summary_stats()
         print("Number of AI Speakers: {}".format(sum(s.is_ai for s in self.iter_speakers())))
-        print("Number of Assistants: {}".format(len(self.assistants)))
-        print("Number of Supports: {}".format(len(self.supports)))
+        print("Number of Assistants: {}".format(sum(1 for _ in self.iter_assistants())))
+        print("Number of Supports: {}".format(sum(1 for _ in self.iter_supports())))

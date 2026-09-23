@@ -3,16 +3,15 @@ from typing import Dict, Iterable, List, Optional, Union
 
 class Support:
     """
-    Represents a single message from an Assistant to a Speaker, outside the main Conversation.
+    Represents a single message from an Assistant to the speaker(s) it assists, outside the main Conversation.
+    The speakers that can see a Support are given by its Assistant's `speakers`.
 
-    :param id: the unique id of the support message
-    :param text: text of the support message
-    :param reply_to: text of the speaker message this support replies to, if any
-    :param speaker_id: id of the Speaker being supported
-    :param assistant_id: id of the Assistant that produced the message
-    :param timestamp: timestamp of the support message
-    :param conversation_id: id of the Conversation the support message belongs to
-    :param meta: arbitrary dictionary of attributes associated with the support message
+    :param id: the unique id of the support
+    :param text: output of the support
+    :param reply_to: id of the utterance the assisted speaker is replying to
+    :param draft: the draft of the post the assisted speaker has written so far ("" means the draft is empty)
+    :param assistant_id: id of the Assistant that produced the support
+    :param timestamp: the timestamp the support was sent
     """
 
     def __init__(
@@ -20,48 +19,41 @@ class Support:
         id: str,
         text: str,
         reply_to: Optional[str] = None,
-        speaker_id: Optional[str] = None,
+        draft: str = "",
         assistant_id: Optional[str] = None,
         timestamp: Union[str, int, None] = None,
-        conversation_id: Optional[str] = None,
-        meta: Optional[Dict] = None,
     ):
         self.id = id
         self.text = text
         self.reply_to = reply_to
-        self.speaker_id = speaker_id
+        self.draft = draft if draft is not None else ""
         self.assistant_id = assistant_id
         self.timestamp = timestamp
-        self.conversation_id = conversation_id
-        self.meta = dict(meta or {})
 
     def to_dict(self) -> Dict:
-        payload = {
+        return {
             "id": self.id,
             "text": self.text,
             "reply_to": self.reply_to,
-            "speaker_id": self.speaker_id,
+            "draft": self.draft,
             "assistant_id": self.assistant_id,
             "timestamp": self.timestamp,
-            "conversation_id": self.conversation_id,
         }
-        if self.meta:
-            payload["meta"] = dict(self.meta)
-        return payload
 
     @classmethod
     def from_dict(cls, data: Dict) -> Optional["Support"]:
+        """
+        Build a Support from its dict form. Keys outside the Support fields are ignored.
+        """
         if not isinstance(data, dict):
             return None
         return cls(
             id=data.get("id"),
             text=data.get("text", ""),
             reply_to=data.get("reply_to"),
-            speaker_id=data.get("speaker_id"),
+            draft=data.get("draft", ""),
             assistant_id=data.get("assistant_id"),
             timestamp=data.get("timestamp"),
-            conversation_id=data.get("conversation_id"),
-            meta=data.get("meta") or {},
         )
 
     @staticmethod
