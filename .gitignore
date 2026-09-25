@@ -41,3 +41,9 @@ venv-triadmotif/
 env/
 website/docs/build
 examples/forecaster/deferral_out
+
+# build artifacts of the standalone convokitai package
+/convokit/convokitai/*.egg-info
+/convokit/convokitai/build/
+/convokit/convokitai-simulation/*.egg-info
+/convokit/convokitai-simulation/build/

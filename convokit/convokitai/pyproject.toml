@@ -1,0 +1,27 @@
+# Builds the standalone `convokitai` package from this folder, separately from `convokit`
+# (which is built from the repository's root setup.py and does not include this folder).
+#
+# Install from GitHub:
+#   pip install "git+https://github.com/ClaireOka/ConvoKit.git@master#subdirectory=convokit/convokitai"
+# Install for local development (from the repository root):
+#   python -m pip install -e ./convokit/convokitai
+
+[project]
+name = "convokitai"
+version = "0.1.0"
+description = "ConvoKit's data model extended with AI speakers, assistants, and support messages"
+requires-python = ">=3.12"
+dependencies = [
+    "convokit>=4.1",
+    # deliberate-lab is only needed for simulation; it lives in convokit-simulation
+    # (convokit/convokitai-simulation/pyproject.toml).
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# this folder is itself the `convokitai` package
+packages = ["convokitai"]
+package-dir = { "convokitai" = "." }

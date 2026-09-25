@@ -1,0 +1,32 @@
+# Builds the standalone `convokit-simulation` package from this folder. It is NOT installed by
+# `pip install convokit` (the root setup.py does not include this folder) or by `convokitai`;
+# install it explicitly to simulate conversations with simulation.simulate.
+#
+# Install from GitHub:
+#   pip install "git+https://github.com/ClaireOka/ConvoKit.git@master#subdirectory=convokit/convokitai-simulation"
+# Install for local development (from the repository root):
+#   python -m pip install -e ./convokit/convokitai-simulation
+
+[project]
+name = "convokit-simulation"
+version = "0.1.0"
+description = "Simulate AI-agent conversations for ConvoKit on a local Deliberate Lab backend"
+requires-python = ">=3.12"
+dependencies = [
+    "requests",
+    # TODO: replace with "deliberate-lab>=0.1" once deliberate-lab is published to PyPI;
+    # PyPI rejects packages with direct git dependencies.
+    "deliberate-lab @ git+ssh://git@github.com/CornellNLP/TrAuSt.git@convokit-local-backend#subdirectory=scripts",
+]
+
+[project.scripts]
+convokit-simulate = "convokit_simulation.simulation:cli"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# this folder is itself the `convokit_simulation` package
+packages = ["convokit_simulation"]
+package-dir = { "convokit_simulation" = "." }

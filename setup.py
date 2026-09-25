@@ -39,11 +39,7 @@ setup(
         "convokit.utterance_simulator",
         "convokit.genai",
         "convokit.convo_similarity",
-        "convokit.convokitai",
-        "convokitai",
     ],
-    # expose convokit/convokitai as the top-level package `convokitai` as well
-    package_dir={"convokitai": "convokit/convokitai"},
     package_data={
         "convokit": [
             "data/*.txt",
