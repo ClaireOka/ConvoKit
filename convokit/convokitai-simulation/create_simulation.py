@@ -220,10 +220,9 @@ def _add_agent_to_cohort(
     (utils/src/participant.validation.ts) even though the template already
     carries defaultModelSettings.
     """
-    url = (
-        f"http://127.0.0.1:{backend.functions_port}/{backend.project_id}"
-        f"/{backend.region}/createParticipant"
-    )
+    # both backends serve the REST API at <functions URL>/api/v1, and
+    # createParticipant sits alongside it
+    url = backend.base_url.removesuffix("/api/v1") + "/createParticipant"
     model_settings = agent.persona.defaultModelSettings
     resp = requests.post(
         url,
