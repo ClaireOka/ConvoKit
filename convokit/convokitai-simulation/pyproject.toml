@@ -9,6 +9,7 @@ dependencies = [
     "requests",
     "pandas",
     "udocker",
+    "pyyaml",
 ]
 
 [build-system]
@@ -17,4 +18,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["deliberate_lab"]
-py-modules = ["local_backend", "dl_container", "simulation"]
+py-modules = ["local_backend", "dl_container", "simulation", "create_simulation"]

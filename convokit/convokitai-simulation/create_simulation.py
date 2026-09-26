@@ -241,7 +241,7 @@ def _heartbeat(log_path: Path, stop: threading.Event, interval: float = 5.0) -> 
         print(f"  ... still waiting on emulators ({elapsed}s elapsed, log is {size} bytes)")
 
 
-def create_simulation(backend: LocalBackend, sim_yaml: yaml) -> dict:
+def create_simulation(backend: LocalBackend, sim_yaml: str) -> dict:
     """Create a two-agent chat experiment on the running backend, add both
     agents to its cohort, and block until the conversation finishes.
     Returns the completed experiment export.
