@@ -74,3 +74,18 @@ def normalize_for_dump(value):
     if isinstance(value, (list, tuple)):
         return [normalize_for_dump(item) for item in value]
     return value
+
+
+def transcript_sort_key(obj) -> Tuple:
+    """
+    Sort key ordering Utterances / Supports by timestamp, then id.
+    """
+    # support timestamps may be strings while utterance timestamps are ints
+    timestamp = obj.timestamp
+    if timestamp is None:
+        key = (0, 0)
+    elif isinstance(timestamp, (int, float)):
+        key = (0, timestamp)
+    else:
+        key = (1, str(timestamp))
+    return key, str(obj.id)

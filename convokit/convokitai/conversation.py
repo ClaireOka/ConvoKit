@@ -2,18 +2,9 @@ from collections import defaultdict
 from typing import Dict, List, Optional
 
 from convokit.model import Conversation as BaseConversation
-from .aiUtil import AI_META_KEYS, LEGACY_AI_KEYS, as_dict, split_ai_fields
+from .aiUtil import AI_META_KEYS, LEGACY_AI_KEYS, as_dict, split_ai_fields, transcript_sort_key
 from .assistant import Assistant
 from .support import Support
-
-
-def _timestamp_sort_key(timestamp):
-    # support timestamps may be strings while utterance timestamps are ints
-    if timestamp is None:
-        return (0, 0)
-    if isinstance(timestamp, (int, float)):
-        return (0, timestamp)
-    return (1, str(timestamp))
 
 
 class Conversation(BaseConversation):
@@ -115,7 +106,29 @@ class Conversation(BaseConversation):
     def supports(self, value):
         self.ai_meta = {"supports": value}
 
-    def get_transcript(self, supports: bool = False) -> str:
+    def __transcript_entries(self, supports: bool) -> List:
+        """
+        The Utterances of the conversation ordered by timestamp, with (if `supports` is True) each Support
+        right after the utterance it replies to (Supports without a reply_to in this conversation come first).
+        """
+        utterances = sorted(self.iter_utterances(), key=transcript_sort_key)
+        if not supports:
+            return utterances
+
+        utt_ids = {utt.id for utt in utterances}
+        supports_by_reply_to = defaultdict(list)
+        for support in sorted(self.supports, key=transcript_sort_key):
+            supports_by_reply_to[support.reply_to if support.reply_to in utt_ids else None].append(
+                support
+            )
+
+        entries = list(supports_by_reply_to.get(None, []))
+        for utterance in utterances:
+            entries.append(utterance)
+            entries.extend(supports_by_reply_to.get(utterance.id, []))
+        return entries
+
+    def get_transcript(self, supports: bool = False, until=None) -> str:
         """
         Get a plain-text transcript of the conversation, one utterance per line, ordered by timestamp.
         Speaker ids are replaced by their aliases, if present.
@@ -123,45 +136,50 @@ class Conversation(BaseConversation):
         :param supports: whether to include Supports. Each Support is shown right after the utterance it
             replies to (Supports without a reply_to in this conversation are shown first), labeled with
             the speakers that can see it.
+        :param until: an Utterance or Support of this conversation; if given, the transcript ends with it
+            (inclusive). A Support given here is always shown, even if `supports` is False.
         :return: the transcript as a single string
         """
-        alias_map = self.alias
-        utterances = list(self.iter_utterances())
-        utterances.sort(key=lambda u: (_timestamp_sort_key(u.timestamp), str(u.id)))
-
-        assistants_by_id = {assistant.id: assistant for assistant in self.assistants}
-        utt_ids = {utt.id for utt in utterances}
-        supports_by_reply_to = defaultdict(list)
-        for support in sorted(
-            self.supports, key=lambda s: (_timestamp_sort_key(s.timestamp), str(s.id))
-        ):
-            supports_by_reply_to[support.reply_to if support.reply_to in utt_ids else None].append(
-                support
+        entries = self.__transcript_entries(supports or isinstance(until, Support))
+        if isinstance(until, Support) and not supports:
+            entries = [e for e in entries if not isinstance(e, Support) or e.id == until.id]
+        if until is not None:
+            end = next(
+                (
+                    i
+                    for i, entry in enumerate(entries)
+                    if isinstance(entry, Support) == isinstance(until, Support)
+                    and entry.id == until.id
+                ),
+                None,
             )
+            if end is None:
+                raise ValueError(
+                    "{} {!r} is not in conversation {!r}".format(
+                        type(until).__name__, until.id, self.id
+                    )
+                )
+            entries = entries[: end + 1]
 
+        alias_map = self.alias
+        assistants_by_id = {assistant.id: assistant for assistant in self.assistants}
         lines = []
-
-        def add_supports(reply_to):
-            for support in supports_by_reply_to.get(reply_to, []):
-                assistant = assistants_by_id.get(support.assistant_id)
-                label = support.assistant_id or "assistant"
+        for entry in entries:
+            if isinstance(entry, Support):
+                assistant = assistants_by_id.get(entry.assistant_id)
+                label = entry.assistant_id or "assistant"
                 viewers = [alias_map.get(s, s) for s in (assistant.speakers if assistant else [])]
                 lines.append(
                     f"    Assistant[{label}]"
                     + (f" -> {', '.join(viewers)}" if viewers else "")
                     + ":"
                 )
-                if support.draft:
-                    lines.append(f"        draft: {support.draft}")
-                lines.append(f"        {label}: {support.text}")
-
-        if supports:
-            add_supports(None)
-        for utterance in utterances:
-            speaker_alias = alias_map.get(utterance.speaker.id, utterance.speaker.id)
-            lines.append(f"{speaker_alias}: {utterance.text}")
-            if supports:
-                add_supports(utterance.id)
+                if entry.draft:
+                    lines.append(f"        draft: {entry.draft}")
+                lines.append(f"        {label}: {entry.text}")
+            else:
+                speaker_alias = alias_map.get(entry.speaker.id, entry.speaker.id)
+                lines.append(f"{speaker_alias}: {entry.text}")
 
         return "\n".join(lines)
 

@@ -69,5 +69,16 @@ class Support:
                 normalized.append(Support.from_dict(item))
         return normalized
 
+    def get_transcript(self, conversation, supports: bool = False) -> str:
+        """
+        Get a plain-text transcript of the given Conversation, from its beginning up to and including
+        this support. See Conversation.get_transcript.
+
+        :param conversation: the Conversation this support belongs to (Supports don't keep a reference to it)
+        :param supports: whether to include the other Supports before this one (this support is always shown)
+        :return: the transcript as a single string
+        """
+        return conversation.get_transcript(supports=supports, until=self)
+
     def __repr__(self):
         return "Support({})".format(self.to_dict())

@@ -3,15 +3,15 @@
 | Field      | Type      | Description                                  |
 |------------|-----------|----------------------------------------------|
 | `id`       | `string`  | Unique ID for the assistant.                 |
-| `config` | `dict` | Configuration for this assistant. See the example below |
+| `config` | `dict` | Configuration for this assistant, including the `prompt` that generates a support message from it (required by `Assistant.generate`). See the example below |
 | `Support[]` | `list` | List of support objects |
 | `speakers` | `list` | List of speakers that can see this Assistant's supports |
-| `prompt` | `string` | Prompt that generates a support message from this assistant |
 | `conversation_id` | `string` | id of conversation |
 
 config example
 ```python
 {
+    'prompt': 'You help goose phrase their replies politely.',
     'model':'gemini-2.5-flash',
     'temperature': 0.7
 }
@@ -39,7 +39,7 @@ config example
 
 | Field    | Type     | Description                                                         |
 | -------- | -------- | ------------------------------------------------------------------- |
-| `config` | `dict`   | Prompt that generates a message for this speaker.                |
+| `config` | `dict`   | Config that generates a message for this speaker (used by `Speaker.generate`): `prompt` (required), `model`, optional `provider` (`gemini` / `gpt` / `local`, inferred from `model`) and `temperature`. |
 | `role`   | `string` | Speaker's role in the conversation, e.g. `participant`, `mediator`. |
 
 

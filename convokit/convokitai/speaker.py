@@ -80,6 +80,72 @@ class Speaker(BaseSpeaker):
         else:
             self._ai_meta = {}
 
+    def generate(
+        self,
+        conversation=None,
+        reply_to: Optional[str] = None,
+        append: bool = False,
+        client=None,
+        config_manager=None,
+        id: Optional[str] = None,
+        timestamp: Optional[int] = None,
+    ):
+        """
+        Generate an Utterance for this speaker with convokit.genai, using the prompt in ai_meta["config"]
+        (see convokitai.generation for the recognized config keys). Requires is_ai to be True.
+
+        :param conversation: if given, the conversation transcript (up to `reply_to`) is included in the prompt
+        :param reply_to: id of the utterance to reply to (defaults to the last utterance of `conversation`)
+        :param append: whether to add the generated utterance to `conversation` (and its Corpus)
+        :param client: a convokit.genai LLMClient to use instead of building one from the config
+        :param config_manager: GenAIConfigManager used to build the client (defaults to ~/.convokit/config.yml)
+        :param id: id of the generated utterance (random if not given)
+        :param timestamp: timestamp of the generated utterance (defaults to after the conversation's last message)
+        :return: the generated Utterance
+        """
+        from . import generation
+        from .utterance import Utterance
+
+        config = self.ai_meta.get("config") or {}
+        if not self.is_ai:
+            raise ValueError("Speaker {!r} is not an AI speaker (is_ai is False)".format(self.id))
+        if not config.get("prompt"):
+            raise ValueError("Speaker {!r} has no prompt in ai_meta['config']".format(self.id))
+        if append and conversation is None:
+            raise ValueError("A conversation is required to append the generated utterance")
+
+        transcript = None
+        name = self.id
+        if conversation is not None:
+            name = conversation.alias.get(self.id, self.id)
+            if reply_to is None:
+                reply_to = generation.last_utterance_id(conversation)
+            if reply_to is not None:
+                transcript = conversation.get_transcript(
+                    until=conversation.get_utterance(reply_to)
+                )
+        prompt = generation.build_prompt(
+            config["prompt"],
+            transcript,
+            "Write the next message in the conversation as {}. "
+            "Respond with only the text of the message.".format(name),
+        )
+        text = generation.call_llm(generation.get_client(config, client, config_manager), config, prompt)
+
+        utterance = Utterance(
+            id=id or generation.new_id(),
+            speaker=self,
+            conversation_id=conversation.id if conversation is not None else None,
+            reply_to=reply_to,
+            timestamp=timestamp if timestamp is not None else generation.next_timestamp(conversation),
+            text=text,
+            ai_meta={"config": dict(config)},
+        )
+        if append:
+            conversation.owner.add_utterances([utterance])
+            utterance = conversation.owner.get_utterance(utterance.id)
+        return utterance
+
     def __str__(self):
         return "Speaker(id: {}, is_ai: {}, vectors: {}, meta: {}, ai_meta: {})".format(
             repr(self.id), self.is_ai, self.vectors, self.meta, self.ai_meta

@@ -12,12 +12,16 @@ def simulate(
     backend: FirebaseBackend | None = None,
 ) -> dict:
     """Run a simulation on the bundled local backend, or on your own deployed
-    Deliberate Lab if `backend` is given."""
+    Deliberate Lab if `backend` is given.
+
+    gemini_api_key is required locally. A deployed backend uses the Gemini key
+    saved in its web UI's Settings by the account that owns the API key.
+    """
     if backend is not None:
         if gemini_api_key:
             raise ValueError(
                 "gemini_api_key is only used with the local backend; on your own "
-                "deployment, set the Gemini key in the web UI's settings instead"
+                "deployment, save the Gemini key in the web UI's Settings instead"
             )
         return create_simulation(backend, sim_yaml)
 

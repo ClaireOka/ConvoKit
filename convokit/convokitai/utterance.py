@@ -81,3 +81,16 @@ class Utterance(BaseUtterance):
     @supports.setter
     def supports(self, value):
         self.ai_meta = {**self.ai_meta, "supports": value}
+
+    def get_transcript(self, supports: bool = False) -> str:
+        """
+        Get a plain-text transcript of this utterance's Conversation, from its beginning up to and
+        including this utterance. See Conversation.get_transcript.
+
+        :param supports: whether to include Supports (Supports replying to this utterance come after it,
+            so they are not included)
+        :return: the transcript as a single string
+        """
+        if self.owner is None:
+            raise ValueError("Utterance {!r} is not part of a Corpus".format(self.id))
+        return self.get_conversation().get_transcript(supports=supports, until=self)
