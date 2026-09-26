@@ -84,7 +84,7 @@ class LocalBackend:
         export_on_exit: str | os.PathLike[str] | None = None,
         region: str = "us-central1",
         functions_port: int = 5001,
-        firestore_port: int = 8080,
+        firestore_port: int = 8085,
         auth_port: int = 9099,
         api_key: str | None = None,
         startup_timeout: float = 180.0,

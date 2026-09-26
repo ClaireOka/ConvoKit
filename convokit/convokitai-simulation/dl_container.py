@@ -37,7 +37,7 @@ __all__ = ["BackendContainer", "BackendContainerError", "DEFAULT_IMAGE"]
 # backend image changes.
 DEFAULT_IMAGE = "ghcr.io/claireoka/deliberate-lab-backend:v0.1"
 
-_PORTS = (5001, 8080, 9099)  # functions, firestore, auth (firebase.docker.json)
+_PORTS = (5001, FIRESTORE_PORT, 9099)  # functions, firestore, auth (firebase.docker.json)
 _NAME = "dl-backend"
 
 
