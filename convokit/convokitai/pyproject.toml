@@ -1,5 +1,8 @@
-# Builds the standalone `convokitai` package from this folder, separately from `convokit`
-# (which is built from the repository's root setup.py and does not include this folder).
+# `convokitai` is installed together with `convokit` by the repository's root setup.py:
+#   pip install "git+https://github.com/ClaireOka/ConvoKit.git@master"
+#
+# This file builds `convokitai` on its own, without the rest of convokit's source. Don't install
+# both ways into the same environment, since each provides the top-level `convokitai` package.
 #
 # Install from GitHub:
 #   pip install "git+https://github.com/ClaireOka/ConvoKit.git@master#subdirectory=convokit/convokitai"

@@ -28,12 +28,10 @@ import time
 from pathlib import Path
 
 import requests
+from dotenv import dotenv_values
 
 import deliberate_lab as dl
-try:
-    from .local_backend import LocalBackend
-except ImportError:  # run directly as a script: python simulation.py
-    from local_backend import LocalBackend
+from local_backend import LocalBackend
 
 TOPIC = "Should pineapple be allowed on pizza?"
 
@@ -243,21 +241,12 @@ def _heartbeat(log_path: Path, stop: threading.Event, interval: float = 5.0) -> 
         print(f"  ... still waiting on emulators ({elapsed}s elapsed, log is {size} bytes)")
 
 
-def simulate(backend: LocalBackend, gemini_api_key: str | None = None) -> dict:
+def simulate(backend: LocalBackend) -> dict:
     """Create a two-agent chat experiment on the running backend, add both
     agents to its cohort, and block until the conversation finishes.
     Returns the completed experiment export.
     """
     client = backend.client()
-
-    if gemini_api_key:
-        _seed_gemini_api_key(backend, gemini_api_key)
-        print("seeded Gemini API key into experimenterData")
-    else:
-        print(
-            "WARNING: no GEMINI_API_KEY found — agents will join but "
-            "every chat turn will silently fail with no messages sent"
-        )
 
     stage = dl.ChatStageConfig(
         id="discussion",
@@ -339,7 +328,17 @@ def main(repo_root: str, gemini_api_key: str | None = None) -> None:
 
     try:
         print(f"backend up at {backend.base_url}")
-        export = simulate(backend, gemini_api_key)
+
+        if gemini_api_key:
+            _seed_gemini_api_key(backend, gemini_api_key)
+            print("seeded Gemini API key into experimenterData")
+        else:
+            print(
+                "WARNING: no GEMINI_API_KEY found — agents will join but "
+                "every chat turn will silently fail with no messages sent"
+            )
+
+        export = simulate(backend)
 
         print("done. full export:")
         print(json.dumps(export, indent=2))
@@ -348,9 +347,5 @@ def main(repo_root: str, gemini_api_key: str | None = None) -> None:
         print("backend stopped")
 
 
-def cli() -> None:
-    main(sys.argv[1] if len(sys.argv) > 1 else ".")
-
-
 if __name__ == "__main__":
-    cli()
+    main(sys.argv[1] if len(sys.argv) > 1 else ".")

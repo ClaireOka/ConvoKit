@@ -94,7 +94,8 @@ class LocalBackend:
     ) -> None:
         """
         Args:
-            repo_root: Checkout containing firebase.json.
+            repo_root: Checkout containing firebase.json. Unused when
+                attaching with ``reuse_running=True``.
             project_id: Passed explicitly as ``--project`` so the URL path and
                 the emulator always agree, sidestepping the mismatch between
                 .firebaserc.example ("demo-project-id") and the DEV_URL baked
@@ -145,7 +146,9 @@ class LocalBackend:
         self._entered = False
         self._stopped = False
 
-        if not (self.repo_root / "firebase.json").is_file():
+        # Attaching to an already-running suite (e.g. the Docker image) needs
+        # no checkout; firebase.json only matters when we spawn the emulators.
+        if not reuse_running and not (self.repo_root / "firebase.json").is_file():
             raise LocalBackendError(
                 f"{self.repo_root} does not look like a Deliberate Lab checkout "
                 "(no firebase.json)."
@@ -191,9 +194,9 @@ class LocalBackend:
             import deliberate_lab as dl
         except ImportError as exc:  # pragma: no cover
             raise LocalBackendError(
-                "deliberate_lab is not installed. Install the convokit-simulation "
-                "package, or: pip install 'git+ssh://git@github.com/CornellNLP/TrAuSt.git"
-                "@convokit-local-backend#subdirectory=scripts'"
+                "deliberate_lab is not installed. Try: pip install "
+                "'git+https://github.com/PAIR-code/deliberate-lab.git"
+                "#subdirectory=scripts'"
             ) from exc
         return dl.Client(base_url=self.base_url, api_key=self.api_key)
 

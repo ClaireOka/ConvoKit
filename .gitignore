@@ -47,3 +47,8 @@ examples/forecaster/deferral_out
 /convokit/convokitai/build/
 /convokit/convokitai-simulation/*.egg-info
 /convokit/convokitai-simulation/build/
+/convokit/convokitai-simulation/**/node_modules/
+/convokit/convokitai-simulation/convokit_simulation/backend/functions/lib/
+/convokit/convokitai-simulation/convokit_simulation/backend/*.log
+# the simulation backend needs its JSON files (firebase.json, package.json, emulator data, ...)
+!/convokit/convokitai-simulation/**/*.json
