@@ -31,11 +31,15 @@ import time
 from pathlib import Path
 from typing import Optional
 
-__all__ = ["BackendContainer", "BackendContainerError", "DEFAULT_IMAGE"]
+__all__ = ["BackendContainer", "BackendContainerError", "DEFAULT_IMAGE", "FIRESTORE_PORT"]
 
 # Pin a version tag rather than :latest so notebooks keep working when the
-# backend image changes.
-DEFAULT_IMAGE = "ghcr.io/claireoka/deliberate-lab-backend:v0.1"
+# backend image changes. v0.1 has Firestore on 8080; v0.2 onward uses 8085.
+DEFAULT_IMAGE = "ghcr.io/claireoka/deliberate-lab-backend:v0.2"
+
+# Must match emulators.firestore.port in the image's firebase.docker.json.
+# Not 8080, because Colab's own runtime already listens there.
+FIRESTORE_PORT = 8085
 
 _PORTS = (5001, FIRESTORE_PORT, 9099)  # functions, firestore, auth (firebase.docker.json)
 _NAME = "dl-backend"
