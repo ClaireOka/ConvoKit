@@ -26,12 +26,33 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from dataclasses import dataclass
 
 import requests
 from dotenv import dotenv_values
 
 import deliberate_lab as dl
 from local_backend import LocalBackend
+
+from dataclasses import dataclass
+
+
+@dataclass
+class FirebaseBackend:
+    """A user's own deployed Deliberate Lab. api_key is a Deliberate Lab API key
+    created in that deployment's web UI (Settings -> API Keys)."""
+
+    project_id: str
+    api_key: str
+    region: str = "us-central1"
+
+    @property
+    def base_url(self) -> str:
+        return f"https://{self.region}-{self.project_id}.cloudfunctions.net/api/v1"
+
+    def client(self) -> dl.Client:
+        return dl.Client(base_url=self.base_url, api_key=self.api_key)
+
 
 TOPIC = "Should pineapple be allowed on pizza?"
 
@@ -186,7 +207,7 @@ def _seed_gemini_api_key(backend: LocalBackend, gemini_api_key: str) -> None:
 
 
 def _add_agent_to_cohort(
-    backend: LocalBackend,
+    backend: LocalBackend | FirebaseBackend,
     experiment_id: str,
     cohort_id: str,
     agent: dl.AgentParticipantTemplate,
@@ -241,7 +262,7 @@ def _heartbeat(log_path: Path, stop: threading.Event, interval: float = 5.0) -> 
         print(f"  ... still waiting on emulators ({elapsed}s elapsed, log is {size} bytes)")
 
 
-def create_simulation(backend: LocalBackend, sim_yaml: str) -> dict:
+def create_simulation(backend: LocalBackend | FirebaseBackend, sim_yaml: str) -> dict:
     """Create a two-agent chat experiment on the running backend, add both
     agents to its cohort, and block until the conversation finishes.
     Returns the completed experiment export.
@@ -273,7 +294,7 @@ def create_simulation(backend: LocalBackend, sim_yaml: str) -> dict:
     ]
 
     result = client.create_simulation(
-        name="Local conversation test",
+        name="simulation test",
         stages=[stage],
         agent_participants=agents,
         num_cohorts=1,
