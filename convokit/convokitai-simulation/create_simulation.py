@@ -614,11 +614,52 @@ def _add_agent_to_cohort(
     return body.get("result", body)
 
 
-def _wait_for_exports(client: dl.Client, experiment_ids: list[str]) -> list[dict]:
-    """Poll until every experiment's participants have finished, then return their exports."""
+def _stall_report(export: dict) -> str:
+    """Describe where an unfinished experiment is stuck: each participant's status and
+    stage, and how far its chat got."""
+    lines = []
+    for participant in export.get("participantMap", {}).values():
+        profile = participant.get("profile", {})
+        lines.append(
+            f"    {profile.get('name')} ({profile.get('publicId')}): "
+            f"{profile.get('currentStatus')} in stage {profile.get('currentStageId')}"
+        )
+    for cohort in export.get("cohortMap", {}).values():
+        messages = cohort.get("chatMap", {}).get(CHAT_STAGE_ID, [])
+        chat_data = cohort.get("dataMap", {}).get(CHAT_STAGE_ID, {})
+        started = chat_data.get("discussionStartTimestamp") is not None
+        lines.append(
+            f"    chat: {sum(m.get('type') != 'system' for m in messages)} message(s), "
+            f"discussion {'started' if started else 'never started (so its time limit never runs)'}"
+        )
+    return "\n".join(lines)
+
+
+def _format_duration(seconds: float) -> str:
+    minutes, seconds = divmod(int(seconds), 60)
+    return f"{minutes}m{seconds:02d}s"
+
+
+def _wait_for_exports(
+    client: dl.Client, experiment_ids: list[str], timeout: float | None = None
+) -> tuple[list[dict], set[str]]:
+    """Poll until every experiment's participants have finished, or until `timeout` seconds
+    have passed, then return all exports (as they stand) and the ids that did not finish."""
     exports: dict[str, dict] = {}
-    with tqdm(total=len(experiment_ids), desc="experiments completed", unit="exp") as progress:
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    with tqdm(
+        total=len(experiment_ids),
+        desc="experiments completed",
+        unit="exp",
+        # tqdm only redraws on updates, so the postfix is reset every poll to keep {elapsed} current
+        bar_format="{desc}: {n_fmt}/{total_fmt} |{bar}| waited {elapsed}{postfix}",
+    ) as progress:
         while len(exports) < len(experiment_ids):
+            if deadline is not None:
+                left = _format_duration(max(0.0, deadline - time.monotonic()))
+                progress.set_postfix_str(f"{left} left before timeout")
+            else:
+                progress.refresh()
             for experiment_id in experiment_ids:
                 if experiment_id in exports:
                     continue
@@ -627,9 +668,21 @@ def _wait_for_exports(client: dl.Client, experiment_ids: list[str]) -> list[dict
                     progress.update(1)
                 except RuntimeError:
                     pass
-            if len(exports) < len(experiment_ids):
-                time.sleep(5)
-    return [exports[experiment_id] for experiment_id in experiment_ids]
+            if len(exports) == len(experiment_ids):
+                break
+            if deadline is not None and time.monotonic() > deadline:
+                break
+            time.sleep(5)
+
+    unfinished = {experiment_id for experiment_id in experiment_ids if experiment_id not in exports}
+    for experiment_id in experiment_ids:
+        if experiment_id in unfinished:
+            exports[experiment_id] = client.export_experiment(experiment_id)
+            print(
+                f"WARNING: experiment {experiment_id} did not finish within {timeout:.0f}s; "
+                f"keeping what it has so far:\n{_stall_report(exports[experiment_id])}"
+            )
+    return [exports[experiment_id] for experiment_id in experiment_ids], unfinished
 
 
 def _heartbeat(log_path: Path, stop: threading.Event, interval: float = 5.0) -> None:
@@ -640,18 +693,27 @@ def _heartbeat(log_path: Path, stop: threading.Event, interval: float = 5.0) -> 
         print(f"  ... still waiting on emulators ({elapsed}s elapsed, log is {size} bytes)")
 
 
-def create_simulation(backend: LocalBackend | FirebaseBackend, sim_yaml: str | Path | dict) -> Corpus:
+def create_simulation(
+    backend: LocalBackend | FirebaseBackend,
+    sim_yaml: str | Path | dict,
+    wait_timeout: float | None = None,
+) -> Corpus:
     """Run every conversation described by the simulation YAML on the running backend and
     block until they all finish.
 
     :param backend: the backend to run on
     :param sim_yaml: path to the simulation YAML, the YAML itself as a string, or the parsed dict
+    :param wait_timeout: seconds to wait for the conversations to finish before keeping them as
+        they stand. Defaults to max_time plus 5 minutes (or no limit if max_time isn't set).
     :return: a convokitai Corpus with one Conversation per pairing and block combination.
-        Each Conversation's meta has the pairing id, experiment id and blocks shown; the
-        corpus's ai_meta["simulation_config"] holds the parsed simulation YAML.
+        Each Conversation's meta has the pairing id, experiment id, blocks shown, and whether
+        it completed; the corpus's ai_meta["simulation_config"] holds the parsed simulation YAML.
     """
     config = load_simulation_config(sim_yaml)
     client = backend.client()
+    if wait_timeout is None and config.get("max_time"):
+        # time for the agents to join and for the last turns to wrap up
+        wait_timeout = config["max_time"] * 60 + 300
 
     runs = []
     for pairing in config["pairings"]:
@@ -675,13 +737,16 @@ def create_simulation(backend: LocalBackend | FirebaseBackend, sim_yaml: str | P
             runs.append((experiment_id, cohort_id, pairing.get("id")))
 
     print(f"{len(runs)} conversation(s) running, waiting for them to finish...")
-    corpus = export_to_corpus(_wait_for_exports(client, [run[0] for run in runs]))
+    exports, unfinished = _wait_for_exports(client, [run[0] for run in runs], wait_timeout)
+    corpus = export_to_corpus(exports)
 
     for experiment_id, cohort_id, pairing_id in runs:
         if corpus.has_conversation(cohort_id):
-            corpus.get_conversation(cohort_id).meta["pairing_id"] = pairing_id
+            convo = corpus.get_conversation(cohort_id)
+            convo.meta["pairing_id"] = pairing_id
+            convo.meta["completed"] = experiment_id not in unfinished
         else:
-            print(f"WARNING: experiment {experiment_id} finished without any chat messages")
+            print(f"WARNING: experiment {experiment_id} has no chat messages, so it is not in the corpus")
     corpus.ai_meta = {"simulation_config": config}
     return corpus
 
