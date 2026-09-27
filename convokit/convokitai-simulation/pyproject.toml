@@ -10,6 +10,7 @@ dependencies = [
     "pandas",
     "udocker",
     "pyyaml",
+    # also needs convokitai, installed with convokit from this repository (see convokit/convokitai/pyproject.toml)
 ]
 
 [build-system]
@@ -18,4 +19,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["deliberate_lab"]
-py-modules = ["local_backend", "dl_container", "simulation", "create_simulation"]
+py-modules = ["local_backend", "dl_container", "simulation", "create_simulation", "export_to_corpus"]

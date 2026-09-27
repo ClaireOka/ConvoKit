@@ -514,7 +514,7 @@ class Client:
         agent_assistants: Optional[list[BaseModel]] = None,
         unlock_time_ms: Optional[int] = None,
         unlock_duration_ms: Optional[int] = None,
-        template: Optional[BaseModel] = None,
+        template: Optional[BaseModel | dict] = None,
         num_cohorts: int = 0,
         cohort_names: list[str] = None,
         cohort_description: Optional[list[str]] = None,
@@ -525,8 +525,11 @@ class Client:
 
         # Full template creation takes precedence
         if template is not None:
-            data["template"] = template.model_dump(
-                mode="json", by_alias=True, exclude_none=True
+            # a plain dict is sent as-is, for templates the pydantic models can't express
+            data["template"] = (
+                template
+                if isinstance(template, dict)
+                else template.model_dump(mode="json", by_alias=True, exclude_none=True)
             )
         else:
             if name is None:

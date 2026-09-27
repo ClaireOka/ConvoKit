@@ -1,40 +1,60 @@
-"""run_conversation.py — spin up the local Deliberate Lab emulator via
-LocalBackend and run a two-agent chat conversation end to end, then print
-the transcript.
+"""create_simulation.py — run agent conversations described by a simulation YAML on a
+Deliberate Lab backend (the local emulator via LocalBackend, or your own deployment via
+FirebaseBackend) and return them as a convokitai Corpus.
 
-Adapted from scripts/startup.py's create_demo(), trimmed to just a chat
-stage between two agent participants (no humans, no survey/mediator), and
-pointed at the emulator through LocalBackend instead of a hardcoded prod URL.
+The simulation YAML (as downloaded from the toolkit) looks like:
+
+    description: ...            # shown with the chat, and used as the post description
+    blocks:                     # text blocks shown with the chat; the first one fills
+      - name: Debate topic      # {topic_name} / {topic_statement} in prompts
+        descriptions:           # one conversation is run per description (per combination,
+          - Cats or dogs?       # with several blocks)
+    max_utterance: 15
+    max_time: 4                 # minutes
+    pairings:                   # one conversation per pairing and block combination
+      - id: ...
+        members:
+          - participant: mediator:<key in definitions.mediators>
+            assistant: null
+          - participant: <key in definitions.agents>
+            assistant: <key in definitions.assistants, or null>
+    definitions:
+      agents: {<key>: {name: ..., content: {...}}}
+      mediators: {...}
+      assistants: {...}
+
+The translation into Deliberate Lab templates follows the mediator toolkit
+(mediator-toolkit/app/api/create-experiment). Each pairing and block combination runs as
+its own experiment with a single cohort, since mediators join every cohort of their experiment.
 
 Requirements:
-    - A deliberate-lab checkout built per local_backend.py's docstring.
-    - The functions emulator needs a real LLM key configured (e.g. GEMINI_API_KEY
-      in the checkout's .env / functions config) — otherwise the agents will be
-      created but every response call will fail, since dl.ApiKeyType.GEMINI below
-      is not a mock.
+    - A deliberate-lab checkout built per local_backend.py's docstring (local backend only).
+    - A real LLM key (e.g. GEMINI_API_KEY) — otherwise the agents will be created but
+      every response call will fail.
 
 Usage:
-    python scripts/run_conversation.py /path/to/deliberate-lab
+    GEMINI_API_KEY=... python create_simulation.py /path/to/deliberate-lab simulation.yaml
 """
 
 from __future__ import annotations
-import yaml
-import json
+
+import itertools
 import os
 import sys
 import tempfile
 import threading
 import time
+import uuid
+from dataclasses import dataclass, replace
 from pathlib import Path
-from dataclasses import dataclass
 
 import requests
-from dotenv import dotenv_values
+import yaml
 
 import deliberate_lab as dl
+from convokitai import Corpus
+from export_to_corpus import export_to_corpus
 from local_backend import LocalBackend
-
-from dataclasses import dataclass
 
 
 @dataclass
@@ -54,111 +74,451 @@ class FirebaseBackend:
         return dl.Client(base_url=self.base_url, api_key=self.api_key)
 
 
-TOPIC = "Should pineapple be allowed on pizza?"
+PROFILE_STAGE_ID = "profile"
+CHAT_STAGE_ID = "chat-round-1"
+STAGE_IDS = [PROFILE_STAGE_ID, CHAT_STAGE_ID]
+
+# prompt item types passed through to Deliberate Lab unchanged
+PASS_THROUGH_ITEMS = {
+    "PROFILE_INFO",
+    "PARTICIPANT_INFO",
+    "PARTICIPANT_CHAT_INPUT",
+    "PROFILE_CONTEXT",
+    "INITIALIZATION_CONTEXT",
+}
+
+# r/ChangeMyView rules referenced by RULE prompt items (from the toolkit's assistant-reddit/topics.ts)
+CMV_RULES = {
+    "A": (
+        "Rule A - Doesn't Explain View",
+        "Explain the reasoning behind your view, not just what that view is (500+ human-generated characters required).",
+    ),
+    "B": (
+        "Rule B - 3rd Party/Devils Advocate/Soapboxing",
+        "You must personally hold the view and demonstrate that you are open to it changing. A post cannot be on behalf of others, playing devil's advocate, as any entity other than yourself, or 'soapboxing'. Posts by throwaway accounts must be approved through modmail.",
+    ),
+    "C": (
+        "Rule C - Unclear/Improper Title",
+        'Submission titles must adequately sum up your view and include "CMV:" at the beginning. Posts with misleading/overly-simplistic titles or titles that contain spoilers may be removed.',
+    ),
+    "D": (
+        "Rule D - Neutral/Transgender/Harm a specific person/Promo/Meta",
+        "Posts cannot express a neutral stance, a stance regarding transgender topics, suggest harm against a specific person, be self-promotional, or discuss this subreddit (visit r/ideasforcmv instead).",
+    ),
+    "E": (
+        "Rule E - No/Minimal Replies from OP in 2 hours",
+        "Only post if you are willing to have a conversation with those who reply to you, and are available to do so within 2 hours of your post going live. If you haven't replied during this time, your post will be removed.",
+    ),
+    "1": (
+        "Rule 1 - Doesn't Challenge OP (top-level only)",
+        "Direct responses to a CMV post must challenge at least one aspect of OP's stated view (however minor), unless they are asking a clarifying question.",
+    ),
+    "2": (
+        "Rule 2 - Rude/Hostile Comment",
+        "Don't be rude or hostile to other users. Your comment will be removed even if the rest of it is solid. 'They started it' is not an excuse. You should report it, not respond to it.",
+    ),
+    "3": (
+        "Rule 3 - Bad Faith Accusation",
+        "Refrain from accusing OP or anyone else of being unwilling to change their view, of using AI to generate their post or comment, of lying, or of arguing in bad faith. If you are unsure whether someone is genuine, ask clarifying questions (see: socratic method). If you think they are still exhibiting ill behaviour, please message us.",
+    ),
+    "4": (
+        "Rule 4 - Delta Abuse/Misuse or Should Award Delta",
+        "Award a delta if you've acknowledged a change in your view. Do not use deltas for any other purpose. You must include an explanation of the change along with the delta so we know it's genuine. Delta abuse includes sarcastic deltas, joke deltas, super-upvote deltas, etc.",
+    ),
+    "5": (
+        "Rule 5 - Doesn't Contribute Meaningfully",
+        'Comments must contain human-generated content and contribute meaningfully to the conversation. Comments that are only links, jokes, or "written upvotes" will be removed. Humor and affirmations of agreement can be contained within more substantial comments.',
+    ),
+}
 
 
-def _structured_output_config() -> dl.AgentParticipantStructuredOutputConfig:
-    return dl.AgentParticipantStructuredOutputConfig(
-        enabled=True,
-        type=dl.StructuredOutputType.JSON_SCHEMA,
-        appendToPrompt=False,
-        shouldRespondField="shouldRespond",
-        messageField="response",
-        explanationField="explanation",
-        readyToEndField="readyToEndChat",
-        schema=dl.StructuredOutputSchema(
-            type=dl.StructuredOutputDataType.OBJECT,
-            properties=[
-                dl.StructuredOutputSchemaProperty(
-                    name="explanation",
-                    schema=dl.StructuredOutputSchema(
-                        type=dl.StructuredOutputDataType.STRING,
-                        description="1-2 sentences on why you are responding or staying silent.",
-                    ),
-                ),
-                dl.StructuredOutputSchemaProperty(
-                    name="shouldRespond",
-                    schema=dl.StructuredOutputSchema(
-                        type=dl.StructuredOutputDataType.BOOLEAN,
-                        description="True to send a message this turn, false to stay silent.",
-                    ),
-                ),
-                dl.StructuredOutputSchemaProperty(
-                    name="response",
-                    schema=dl.StructuredOutputSchema(
-                        type=dl.StructuredOutputDataType.STRING,
-                        description="Your chat message (empty string if staying silent).",
-                    ),
-                ),
-                dl.StructuredOutputSchemaProperty(
-                    name="readyToEndChat",
-                    schema=dl.StructuredOutputSchema(
-                        type=dl.StructuredOutputDataType.BOOLEAN,
-                        description="Whether you are ready to end the conversation.",
-                    ),
-                ),
-            ],
-        ),
-    )
+@dataclass
+class _PromptContext:
+    """Values that fill in the simulation YAML's placeholder prompt items."""
+
+    substitutions: dict[str, str]
+    post_title: str
+    post_description: str
+    role: str = ""
+    character: str = ""
 
 
-def _agent_template(agent_id: str, name: str, stance: str) -> dl.AgentParticipantTemplate:
-    persona_prompt = f"""
-You are {name}, a participant in a live discussion about "{TOPIC}".
-Your stance: {stance}
+def load_simulation_config(sim_yaml: str | Path | dict) -> dict:
+    """Load a simulation config from a YAML file path, a YAML string, or an already-parsed dict."""
+    if isinstance(sim_yaml, dict):
+        config = sim_yaml
+    elif isinstance(sim_yaml, Path) or os.path.isfile(sim_yaml):
+        config = yaml.safe_load(Path(sim_yaml).read_text(encoding="utf-8"))
+    else:
+        config = yaml.safe_load(sim_yaml)
+    if not isinstance(config, dict) or not config.get("pairings"):
+        raise ValueError("the simulation YAML must define at least one pairing")
+    return config
 
-Respond ONLY with JSON matching this schema, no markdown, no prose outside the JSON:
-{{"explanation": "...", "shouldRespond": true, "response": "...", "readyToEndChat": false}}
 
-Keep "response" under 20 words when you do respond. Stay in character.
-"""
-    chat_prompt = dl.ChatPromptConfig(
-        id="discussion",
-        type=dl.ChatStageType.chat,
-        includeScaffoldingInPrompt=True,
-        prompt={
-            "default": [
-                dl.TextPromptItem(type="TEXT", text=persona_prompt),
-                dl.ProfileInfoPromptItem(type="PROFILE_INFO"),
-                dl.StageContextPromptItem(
-                    type="STAGE_CONTEXT",
-                    stageId="discussion",
-                    includePrimaryText=True,
-                    includeInfoText=False,
-                    includeHelpText=False,
-                    includeStageDisplay=True,
-                    includeParticipantAnswers=True,
-                ),
-            ]
+def _get(d: dict | None, key: str, default=None):
+    """d[key], accepting the snake_case key or its camelCase form (the simulation YAML uses both)."""
+    if not d:
+        return default
+    if key in d:
+        return d[key]
+    head, *rest = key.split("_")
+    return d.get(head + "".join(word.capitalize() for word in rest), default)
+
+
+def _exclude_none(value):
+    """Drop None values recursively, like pydantic's model_dump(exclude_none=True)."""
+    if isinstance(value, dict):
+        return {k: _exclude_none(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_exclude_none(v) for v in value]
+    return value
+
+
+def _block_variants(config: dict) -> list[list[dict]]:
+    """Every combination of the blocks' descriptions, each as a list of {name, description}."""
+    options = [
+        [
+            {"name": block.get("name", ""), "description": description}
+            for description in (block.get("descriptions") or [block.get("description", "")])
+        ]
+        for block in config.get("blocks") or []
+    ]
+    return [list(combo) for combo in itertools.product(*options)]
+
+
+def _base_context(config: dict, blocks: list[dict]) -> _PromptContext:
+    topic = blocks[0] if blocks else {"name": "", "description": ""}
+    post_title = config.get("post_title") or topic["description"]
+    post_description = config.get("post_description") or config.get("description", "")
+    return _PromptContext(
+        substitutions={
+            "{topic_name}": topic["name"],
+            "{topic_statement}": topic["description"],
+            "{post_title}": post_title,
+            "{post_description}": post_description,
         },
-        order={1: ["default"]},
-        addTo={},
-        structuredOutputConfig=_structured_output_config(),
-        generationConfig=dl.ModelGenerationConfig(
-            temperature=0.7,
-            reasoningLevel=dl.ReasoningLevel.off,
-            includeReasoning=False,
-        ),
-        chatSettings=dl.AgentChatSettings(
-            minMessagesBeforeResponding=0,
-            canSelfTriggerCalls=False,
-            initialMessage="",
-            wordsPerMinute=0,
-            concedeStrength=0,
-        ),
-        numRetries=2,
+        post_title=post_title,
+        post_description=post_description,
     )
-    return dl.AgentParticipantTemplate(
-        persona=dl.ParticipantPersona(
-            id=agent_id,
-            name=name,
-            defaultModelSettings=dl.AgentModelSettings(
-                apiType=dl.ApiKeyType.GEMINI,
-                modelName="gemini-3-flash-preview",
-            ),
+
+
+def _context_items(context: str) -> list[dict]:
+    """Expand a CONTEXT item into STAGE_CONTEXT items for the chat stage ('current'),
+    the stages before it ('before'), or both ('all')."""
+    chat_index = STAGE_IDS.index(CHAT_STAGE_ID)
+    if context == "all":
+        stage_ids = STAGE_IDS[: chat_index + 1]
+    elif context == "before":
+        stage_ids = STAGE_IDS[:chat_index]
+    elif context == "current":
+        stage_ids = [CHAT_STAGE_ID]
+    else:
+        raise ValueError(f"unknown context {context!r}; must be 'all', 'before', or 'current'")
+    return [
+        {
+            "type": "STAGE_CONTEXT",
+            "stageId": stage_id,
+            "includePrimaryText": True,
+            "includeInfoText": False,
+            "includeHelpText": False,
+            "includeStageDisplay": True,
+            "includeParticipantAnswers": True,
+        }
+        for stage_id in stage_ids
+    ]
+
+
+def _prompt_items(items: list[dict] | None, default_context: str | None, ctx: _PromptContext) -> list[dict]:
+    """Translate simulation YAML prompt items into Deliberate Lab prompt items."""
+    out = []
+    for item in sorted(items or [], key=lambda i: i.get("id", 0)):
+        kind = item["type"]
+        if kind == "CONTEXT":
+            out += _context_items(item.get("context") or default_context or "current")
+        elif kind in PASS_THROUGH_ITEMS:
+            out.append({"type": kind})
+        elif kind == "PRELOADED_CONTEXT":
+            out.append({"type": "INITIALIZATION_CONTEXT"})
+        elif kind == "TEXT":
+            text = item.get("text") or ""
+            for token, value in ctx.substitutions.items():
+                text = text.replace(token, value)
+            out.append({"type": "TEXT", "text": text})
+        elif kind == "POST_TITLE":
+            out.append({"type": "TEXT", "text": f"Title: {ctx.post_title}"})
+        elif kind == "POST_DESCRIPTION":
+            out.append({"type": "TEXT", "text": f"Description: {ctx.post_description}"})
+        elif kind == "ARTICLE_PAGE":
+            out.append({"type": "TEXT", "text": f"{ctx.post_title}\n{ctx.post_description}"})
+        elif kind == "PARTICIPANT_ROLE":
+            out.append({"type": "TEXT", "text": f"Role: {ctx.role}"})
+        elif kind == "CHARACTER_CONTEXT":
+            out.append({"type": "TEXT", "text": ctx.character})
+        elif kind == "RULE":
+            rule = str(item.get("rule"))
+            if rule not in CMV_RULES:
+                raise ValueError(f"unknown rule {rule!r}; must be one of {', '.join(CMV_RULES)}")
+            title, description = CMV_RULES[rule]
+            out.append({"type": "TEXT", "text": f"Rule Title: {title}\nRule Description: {description}"})
+        else:
+            raise ValueError(f"unknown prompt item type {kind!r}")
+    return out
+
+
+def _persona(content: dict, persona_type: str) -> dict:
+    persona = content["persona"]
+    model = content["model"]
+    name = persona.get("name", "")
+    return {
+        "id": persona["id"],
+        "name": name,
+        "type": persona_type,
+        "defaultProfile": {
+            "name": name,
+            "avatar": persona.get("avatar"),
+            "pronouns": persona.get("pronouns"),
+        },
+        "defaultModelSettings": {"apiType": model["apiType"], "modelName": model["modelName"]},
+    }
+
+
+def _generation(content: dict) -> dict:
+    generation = content.get("generation") or {}
+    return {
+        "temperature": generation.get("temperature"),
+        "reasoningLevel": _get(generation, "reasoning_level"),
+        "includeReasoning": _get(generation, "include_reasoning"),
+    }
+
+
+def _chat_settings(settings: dict | None) -> dict:
+    return {
+        "minMessagesBeforeResponding": _get(settings, "min_messages_before_responding", 0),
+        "canSelfTriggerCalls": _get(settings, "can_self_trigger_calls", False),
+        "initialMessage": _get(settings, "initial_message", ""),
+        "wordsPerMinute": _get(settings, "words_per_minute", 0),
+    }
+
+
+def _structured_output(config: dict | None) -> dict | None:
+    if not config:
+        return None
+    return {
+        "enabled": config.get("enabled", True),
+        "type": "JSON_SCHEMA",
+        "appendToPrompt": _get(config, "append_to_prompt", False),
+        "shouldRespondField": _get(config, "should_respond_field"),
+        "messageField": _get(config, "message_field"),
+        "explanationField": _get(config, "explanation_field"),
+        "readyToEndField": _get(config, "ready_to_end_field"),
+        "schema": {
+            "type": "OBJECT",
+            "properties": [
+                {"name": name, "schema": {"type": field["type"], "description": field.get("description", "")}}
+                for name, field in (config.get("schema") or {}).items()
+            ],
+        },
+    }
+
+
+def _mediator_template(content: dict, ctx: _PromptContext) -> dict:
+    context = content.get("context")
+    prompt_config = {
+        "id": CHAT_STAGE_ID,
+        "type": "chat",
+        "includeScaffoldingInPrompt": _get(content, "include_scaffolding_in_prompt"),
+        "prompt": _prompt_items(content.get("prompt"), context, ctx),
+        "shouldRespondPrompt": _prompt_items(
+            _get(content, "should_respond_prompt"), _get(content, "should_respond_context") or context, ctx
         ),
-        promptMap={"discussion": chat_prompt},
-    )
+        "minParticipantMessagesBeforeResponding": _get(content, "min_participant_messages_before_responding"),
+        "structuredOutputConfig": _structured_output(_get(content, "structured_output")),
+        "generationConfig": _generation(content),
+        "chatSettings": _chat_settings(_get(content, "chat_settings")),
+        "numRetries": _get(content, "num_retries"),
+    }
+    init_prompt = _get(content, "initialization_context_prompt") or _get(content, "preload_context_prompt")
+    if init_prompt:
+        prompt_config["initializationContextPrompt"] = _prompt_items(
+            init_prompt, _get(content, "initialization_context_context") or context, ctx
+        )
+    persona = _persona(content, "mediator")
+    persona["isDefaultAddToCohort"] = True
+    return {"persona": persona, "promptMap": {CHAT_STAGE_ID: prompt_config}}
+
+
+def _assistant_template(content: dict, ctx: _PromptContext) -> dict:
+    context = content.get("context")
+    persona = _persona(content, "assistant")
+    persona["minCallIntervalMs"] = _get(content["persona"], "min_call_interval_ms")
+    if ctx.role:
+        # PARTICIPANT_ROLE makes the prompt role-specific, so each role needs its own assistant
+        persona["id"] = f"{persona['id']}-{ctx.role.lower().replace(' ', '-')}"
+    prompt_config = {
+        "id": CHAT_STAGE_ID,
+        "type": "chat",
+        "prompt": {"default": _prompt_items(content.get("prompt"), context, ctx)},
+        "order": {},
+        "addTo": {},
+        "shouldRespondPrompt": _prompt_items(
+            _get(content, "should_respond_prompt"), _get(content, "should_respond_context") or context, ctx
+        ),
+        "structuredOutputConfig": _structured_output(_get(content, "structured_output")),
+        "generationConfig": _generation(content),
+        "numRetries": _get(content, "num_retries"),
+    }
+    return {"persona": persona, "promptMap": {CHAT_STAGE_ID: prompt_config}}
+
+
+def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ctx: _PromptContext) -> dict:
+    settings = _get(content, "chat_settings") or {}
+    context = settings.get("context") or content.get("context")
+    prompt_map = _get(settings, "prompt_map")
+    if prompt_map:
+        prompts = {
+            key: _prompt_items(entry.get("prompt"), context, ctx) for key, entry in prompt_map.items()
+        }
+        order: dict[int, list[str]] = {}
+        for key, entry in prompt_map.items():
+            order.setdefault(entry.get("order", 1), []).append(key)
+    else:
+        prompts = {"default": _prompt_items(content.get("prompt"), context, ctx)}
+        order = {1: ["default"]}
+
+    prompt_config = {
+        "id": CHAT_STAGE_ID,
+        "type": "chat",
+        "includeScaffoldingInPrompt": _get(
+            settings, "include_scaffolding_in_prompt", _get(content, "include_scaffolding_in_prompt")
+        ),
+        "prompt": prompts,
+        "order": order,
+        "addTo": {},
+        "structuredOutputConfig": _structured_output(
+            _get(content, "structured_output") or _get(settings, "structured_output")
+        ),
+        "generationConfig": _generation(content),
+        "chatSettings": _chat_settings(settings),
+        "numRetries": _get(settings, "num_retries", _get(content, "num_retries")),
+    }
+    persona = _persona(content, "participant")
+    persona["id"] = persona_id
+    persona["assistantId"] = assistant_id
+    return {"persona": persona, "promptMap": {CHAT_STAGE_ID: prompt_config}}
+
+
+def _definition(definitions: dict, section: str, key: str) -> dict:
+    try:
+        entry = definitions[section][key]
+    except (KeyError, TypeError):
+        raise ValueError(f"a pairing references {key!r}, which is not in definitions.{section}") from None
+    return entry.get("content", entry)
+
+
+def _experiment_template(config: dict, pairing: dict, blocks: list[dict]) -> tuple[dict, dict, list[dict]]:
+    """Build the experiment template for one pairing and block combination.
+
+    :return: the template, its cohort participant config, and the agent participant templates
+        to add to the cohort
+    """
+    definitions = config.get("definitions") or {}
+    ctx = _base_context(config, blocks)
+
+    mediators, agents = [], []
+    assistants: dict[str, dict] = {}
+    persona_ids: set[str] = set()
+    for member in pairing.get("members") or []:
+        kind, _, key = member["participant"].rpartition(":")
+        if kind == "mediator":
+            mediators.append(_mediator_template(_definition(definitions, "mediators", key), ctx))
+            continue
+        if kind not in ("", "agent"):
+            raise ValueError(f"unknown participant {member['participant']!r}")
+
+        content = _definition(definitions, "agents", key)
+        character = content["persona"].get("character")
+        member_ctx = replace(
+            ctx, role=member.get("role") or "", character=character if isinstance(character, str) else ""
+        )
+        assistant_id = None
+        if member.get("assistant"):
+            assistant = _assistant_template(
+                _definition(definitions, "assistants", member["assistant"]), member_ctx
+            )
+            assistant_id = assistant["persona"]["id"]
+            assistants.setdefault(assistant_id, assistant)
+
+        # the same agent can appear twice in a pairing, but persona ids must be unique
+        persona_id = base_id = content["persona"]["id"]
+        suffix = 2
+        while persona_id in persona_ids:
+            persona_id = f"{base_id}-{suffix}"
+            suffix += 1
+        persona_ids.add(persona_id)
+        agents.append(_agent_template(content, persona_id, assistant_id, member_ctx))
+
+    description = config.get("description", "")
+    cohort_config = {
+        "minParticipantsPerCohort": len(agents),
+        "maxParticipantsPerCohort": len(agents),
+        "includeAllParticipantsInCohortCount": True,
+        "botProtection": False,
+    }
+    stages = [
+        {
+            "id": PROFILE_STAGE_ID,
+            "kind": "profile",
+            "name": "Profile Setup",
+            "descriptions": {"primaryText": "Set up your profile", "infoText": "", "helpText": ""},
+            "progress": {"minParticipants": 1, "waitForAllParticipants": False, "showParticipantProgress": False},
+            "profileType": "ANONYMOUS_ANIMAL",
+        },
+        {
+            "id": CHAT_STAGE_ID,
+            "kind": "chat",
+            "name": "Conversation",
+            "descriptions": {"primaryText": description, "infoText": "", "helpText": "", "blocks": blocks},
+            "progress": {
+                "minParticipants": len(agents),
+                "waitForAllParticipants": False,
+                "showParticipantProgress": True,
+            },
+            "discussions": [],
+            "timeLimitInMinutes": config.get("max_time"),
+            "requireFullTime": False,
+            "numUtterances": config.get("max_utterance"),
+        },
+    ]
+    template = {
+        "id": f"template-{uuid.uuid4().hex[:16]}",
+        "experiment": {
+            "id": f"exp-{uuid.uuid4().hex[:16]}",
+            "versionId": 0,
+            "metadata": {
+                "name": f"[agent-agent] {config.get('name', 'simulation')}",
+                "publicName": "Simulation",
+                "description": description,
+                "tags": ["convokitai-simulation"],
+            },
+            "permissions": {"visibility": "public", "readers": []},
+            "defaultCohortConfig": cohort_config,
+            "prolificConfig": {
+                "enableProlificIntegration": False,
+                "defaultRedirectCode": "",
+                "attentionFailRedirectCode": "",
+                "bootedRedirectCode": "",
+            },
+            "stageIds": STAGE_IDS,
+            "cohortLockMap": {},
+            "cohortDefinitions": [],
+        },
+        "stageConfigs": stages,
+        "agentMediators": mediators,
+        "agentParticipants": agents,
+        "agentAssistants": list(assistants.values()),
+    }
+    return _exclude_none(template), cohort_config, agents
 
 
 def _seed_gemini_api_key(backend: LocalBackend, gemini_api_key: str) -> None:
@@ -210,7 +570,7 @@ def _add_agent_to_cohort(
     backend: LocalBackend | FirebaseBackend,
     experiment_id: str,
     cohort_id: str,
-    agent: dl.AgentParticipantTemplate,
+    agent: dict,
 ) -> dict:
     """Spawn a participant instance of an agent template into a cohort.
 
@@ -223,7 +583,14 @@ def _add_agent_to_cohort(
     # both backends serve the REST API at <functions URL>/api/v1, and
     # createParticipant sits alongside it
     url = backend.base_url.removesuffix("/api/v1") + "/createParticipant"
-    model_settings = agent.persona.defaultModelSettings
+    persona = agent["persona"]
+    agent_config = {
+        "agentId": persona["id"],
+        "promptContext": "",
+        "modelSettings": persona["defaultModelSettings"],
+    }
+    if persona.get("assistantId"):
+        agent_config["assistantId"] = persona["assistantId"]
     resp = requests.post(
         url,
         json={
@@ -231,14 +598,7 @@ def _add_agent_to_cohort(
                 "experimentId": experiment_id,
                 "cohortId": cohort_id,
                 "isAnonymous": True,
-                "agentConfig": {
-                    "agentId": agent.persona.id,
-                    "promptContext": "",
-                    "modelSettings": {
-                        "apiType": model_settings.apiType,
-                        "modelName": model_settings.modelName,
-                    },
-                },
+                "agentConfig": agent_config,
             }
         },
         timeout=60,
@@ -253,6 +613,27 @@ def _add_agent_to_cohort(
     return body.get("result", body)
 
 
+def _wait_for_exports(client: dl.Client, experiment_ids: list[str]) -> list[dict]:
+    """Poll until every experiment's participants have finished, then return their exports."""
+    exports: dict[str, dict] = {}
+    poll_start = time.monotonic()
+    while len(exports) < len(experiment_ids):
+        for experiment_id in experiment_ids:
+            if experiment_id in exports:
+                continue
+            try:
+                exports[experiment_id] = client.get_completed_experiment_data(experiment_id)
+                print(f"  {experiment_id} finished")
+            except RuntimeError:
+                pass
+        remaining = len(experiment_ids) - len(exports)
+        if remaining:
+            elapsed = int(time.monotonic() - poll_start)
+            print(f"  ... {remaining} still running ({elapsed}s elapsed)")
+            time.sleep(5)
+    return [exports[experiment_id] for experiment_id in experiment_ids]
+
+
 def _heartbeat(log_path: Path, stop: threading.Event, interval: float = 5.0) -> None:
     start = time.monotonic()
     while not stop.wait(interval):
@@ -261,75 +642,53 @@ def _heartbeat(log_path: Path, stop: threading.Event, interval: float = 5.0) -> 
         print(f"  ... still waiting on emulators ({elapsed}s elapsed, log is {size} bytes)")
 
 
-def create_simulation(backend: LocalBackend | FirebaseBackend, sim_yaml: str) -> dict:
-    """Create a two-agent chat experiment on the running backend, add both
-    agents to its cohort, and block until the conversation finishes.
-    Returns the completed experiment export.
+def create_simulation(backend: LocalBackend | FirebaseBackend, sim_yaml: str | Path | dict) -> Corpus:
+    """Run every conversation described by the simulation YAML on the running backend and
+    block until they all finish.
+
+    :param backend: the backend to run on
+    :param sim_yaml: path to the simulation YAML, the YAML itself as a string, or the parsed dict
+    :return: a convokitai Corpus with one Conversation per pairing and block combination.
+        Each Conversation's meta has the pairing id, experiment id and blocks shown; the
+        corpus's ai_meta["simulation_config"] holds the parsed simulation YAML.
     """
+    config = load_simulation_config(sim_yaml)
     client = backend.client()
 
-    stage = dl.ChatStageConfig(
-        id="discussion",
-        kind="chat",
-        name="Discussion",
-        descriptions={
-            "primaryText": f'Discuss: "{TOPIC}"',
-            "infoText": "",
-            "helpText": "",
-        },
-        progress={
-            "minParticipants": 2,
-            "waitForAllParticipants": False,
-            "showParticipantProgress": True,
-        },
-        timeLimitInMinutes=2,
-        numUtterances=5,
-        discussions=[dl.DefaultChatDiscussion(id="main", description=TOPIC)],
-    )
-
-    agents = [
-        _agent_template("agent-pro", "Pat", "You love pineapple on pizza."),
-        _agent_template("agent-anti", "Alex", "You think pineapple ruins pizza."),
-    ]
-
-    result = client.create_simulation(
-        name="simulation test",
-        stages=[stage],
-        agent_participants=agents,
-        num_cohorts=1,
-        cohort_names=["cohort"],
-        cohort_participant_config=[
-            dl.CohortParticipantConfig(
-                minParticipantsPerCohort=2,
-                maxParticipantsPerCohort=2,
-                includeAllParticipantsInCohortCount=True,
-                botProtection=False,
+    runs = []
+    for pairing in config["pairings"]:
+        for blocks in _block_variants(config):
+            template, cohort_config, agents = _experiment_template(config, pairing, blocks)
+            result = client.create_simulation(
+                template=template,
+                num_cohorts=1,
+                cohort_names=[f"[convokitai-sim] {pairing.get('id', 'pairing')}"],
+                cohort_participant_config=[dl.CohortParticipantConfig(**cohort_config)],
             )
-        ],
-    )
+            experiment_id = result["experiment"]["experiment"]["id"]
+            cohort = result["cohorts"][0]
+            cohort_id = cohort["cohort"]["id"] if "cohort" in cohort else cohort["id"]
+            topic = "; ".join(block["description"] for block in blocks)
+            print(f"created experiment {experiment_id}, cohort {cohort_id} (pairing {pairing.get('id')}: {topic})")
 
-    experiment_id = result["experiment"]["experiment"]["id"]
-    cohort = result["cohorts"][0]
-    cohort_id = cohort["cohort"]["id"] if "cohort" in cohort else cohort["id"]
-    print(f"created experiment {experiment_id}, cohort {cohort_id}")
+            for agent in agents:
+                _add_agent_to_cohort(backend, experiment_id, cohort_id, agent)
+                print(f"  {agent['persona']['id']} joined")
+            runs.append((experiment_id, cohort_id, pairing.get("id")))
 
-    for agent in agents:
-        print(f"adding {agent.persona.id} ({agent.persona.name}) to cohort...")
-        _add_agent_to_cohort(backend, experiment_id, cohort_id, agent)
-        print(f"  {agent.persona.id} joined")
-    print("all agents joined, waiting for the conversation to finish...")
+    print(f"{len(runs)} conversation(s) running, waiting for them to finish...")
+    corpus = export_to_corpus(_wait_for_exports(client, [run[0] for run in runs]))
 
-    poll_start = time.monotonic()
-    while True:
-        try:
-            return client.get_completed_experiment_data(experiment_id)
-        except RuntimeError:
-            elapsed = int(time.monotonic() - poll_start)
-            print(f"  ... still running ({elapsed}s elapsed)")
-            time.sleep(5)
+    for experiment_id, cohort_id, pairing_id in runs:
+        if corpus.has_conversation(cohort_id):
+            corpus.get_conversation(cohort_id).meta["pairing_id"] = pairing_id
+        else:
+            print(f"WARNING: experiment {experiment_id} finished without any chat messages")
+    corpus.ai_meta = {"simulation_config": config}
+    return corpus
 
 
-def main(repo_root: str, gemini_api_key: str | None = None) -> None:
+def main(repo_root: str, sim_yaml: str, gemini_api_key: str | None = None) -> None:
     log_path = Path(tempfile.gettempdir()) / f"dl-run-conversation-{int(time.time())}.log"
     print("starting emulators (first boot can take a couple minutes) — tail progress with:")
     print(f"  tail -f {log_path}")
@@ -358,14 +717,19 @@ def main(repo_root: str, gemini_api_key: str | None = None) -> None:
                 "every chat turn will silently fail with no messages sent"
             )
 
-        export = create_simulation(backend, None)
+        corpus = create_simulation(backend, sim_yaml)
 
-        print("done. full export:")
-        print(json.dumps(export, indent=2))
+        print("done.")
+        corpus.print_summary_stats()
+        for convo in corpus.iter_conversations():
+            print(f"\n=== {convo.id} (pairing {convo.meta.get('pairing_id')}) ===")
+            print(convo.get_transcript(supports=True))
     finally:
         backend_cm.__exit__(*sys.exc_info())
         print("backend stopped")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else ".")
+    if len(sys.argv) < 3:
+        sys.exit("usage: python create_simulation.py /path/to/deliberate-lab simulation.yaml")
+    main(sys.argv[1], sys.argv[2], os.environ.get("GEMINI_API_KEY"))

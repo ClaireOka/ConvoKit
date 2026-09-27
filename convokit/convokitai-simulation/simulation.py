@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from convokitai import Corpus
 from dl_container import BackendContainer, FIRESTORE_PORT
 from local_backend import LocalBackend
 from create_simulation import FirebaseBackend, _seed_gemini_api_key, create_simulation
@@ -10,9 +11,12 @@ def simulate(
     sim_yaml: str | Path | dict | None = None,
     *,
     backend: FirebaseBackend | None = None,
-) -> dict:
+) -> Corpus:
     """Run a simulation on the bundled local backend, or on your own deployed
-    Deliberate Lab if `backend` is given.
+    Deliberate Lab if `backend` is given, and return the conversations as a
+    convokitai Corpus.
+
+    sim_yaml is the simulation YAML: a file path, the YAML text, or the parsed dict.
 
     gemini_api_key is required locally. A deployed backend uses the Gemini key
     saved in its web UI's Settings by the account that owns the API key.
