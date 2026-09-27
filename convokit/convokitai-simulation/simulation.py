@@ -32,6 +32,12 @@ def simulate(
     if not gemini_api_key:
         raise ValueError("gemini_api_key is required for the local backend")
     with BackendContainer():
-        with LocalBackend(".", reuse_running=True, firestore_port=FIRESTORE_PORT) as local:
+        with LocalBackend(
+            ".",
+            reuse_running=True,
+            firestore_port=FIRESTORE_PORT,
+            # the functions can take minutes to load under udocker (Colab)
+            startup_timeout=600,
+        ) as local:
             _seed_gemini_api_key(local, gemini_api_key)
             return create_simulation(local, sim_yaml)

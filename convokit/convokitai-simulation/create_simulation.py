@@ -50,6 +50,7 @@ from pathlib import Path
 
 import requests
 import yaml
+from tqdm.auto import tqdm
 
 import deliberate_lab as dl
 from convokitai import Corpus
@@ -616,21 +617,18 @@ def _add_agent_to_cohort(
 def _wait_for_exports(client: dl.Client, experiment_ids: list[str]) -> list[dict]:
     """Poll until every experiment's participants have finished, then return their exports."""
     exports: dict[str, dict] = {}
-    poll_start = time.monotonic()
-    while len(exports) < len(experiment_ids):
-        for experiment_id in experiment_ids:
-            if experiment_id in exports:
-                continue
-            try:
-                exports[experiment_id] = client.get_completed_experiment_data(experiment_id)
-                print(f"  {experiment_id} finished")
-            except RuntimeError:
-                pass
-        remaining = len(experiment_ids) - len(exports)
-        if remaining:
-            elapsed = int(time.monotonic() - poll_start)
-            print(f"  ... {remaining} still running ({elapsed}s elapsed)")
-            time.sleep(5)
+    with tqdm(total=len(experiment_ids), desc="experiments completed", unit="exp") as progress:
+        while len(exports) < len(experiment_ids):
+            for experiment_id in experiment_ids:
+                if experiment_id in exports:
+                    continue
+                try:
+                    exports[experiment_id] = client.get_completed_experiment_data(experiment_id)
+                    progress.update(1)
+                except RuntimeError:
+                    pass
+            if len(exports) < len(experiment_ids):
+                time.sleep(5)
     return [exports[experiment_id] for experiment_id in experiment_ids]
 
 

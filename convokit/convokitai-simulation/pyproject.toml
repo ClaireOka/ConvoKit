@@ -10,6 +10,7 @@ dependencies = [
     "pandas",
     "udocker",
     "pyyaml",
+    "tqdm",
     # also needs convokitai, installed with convokit from this repository (see convokit/convokitai/pyproject.toml)
 ]
 

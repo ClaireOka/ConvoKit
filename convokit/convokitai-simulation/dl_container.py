@@ -41,6 +41,11 @@ DEFAULT_IMAGE = "ghcr.io/claireoka/deliberate-lab-backend:v0.2"
 # Not 8080, because Colab's own runtime already listens there.
 FIRESTORE_PORT = 8085
 
+# The Firebase CLI gives the functions code 10s to load before it can list the
+# functions to serve. Node is far slower under udocker (Colab), so without a
+# longer limit the functions emulator comes up with no functions at all.
+DEFAULT_ENV = {"FUNCTIONS_DISCOVERY_TIMEOUT": "300"}  # seconds
+
 _PORTS = (5001, FIRESTORE_PORT, 9099)  # functions, firestore, auth (firebase.docker.json)
 _NAME = "dl-backend"
 
@@ -58,6 +63,7 @@ class BackendContainer:
         pull: bool = True,
         startup_timeout: float = 600.0,
         log_path: str | os.PathLike[str] | None = None,
+        env: Optional[dict[str, str]] = None,
     ) -> None:
         """
         Args:
@@ -70,12 +76,14 @@ class BackendContainer:
                 udocker run also extracts the image, which is slow.
             log_path: Where to write container output (udocker only; with
                 Docker use `docker logs dl-backend`).
+            env: Environment variables for the container, added to DEFAULT_ENV.
         """
         self.image = image
         self.runtime = runtime or ("docker" if _docker_available() else "udocker")
         if self.runtime not in ("docker", "udocker"):
             raise BackendContainerError(f"Unknown runtime: {self.runtime!r}")
         self.pull = pull
+        self.env = {**DEFAULT_ENV, **(env or {})}
         self.startup_timeout = startup_timeout
         self.log_path = Path(log_path) if log_path else Path(
             tempfile.gettempdir()
@@ -133,7 +141,8 @@ class BackendContainer:
         if self.pull:
             _run(["docker", "pull", self.image])
         ports = [arg for p in _PORTS for arg in ("-p", f"{p}:{p}")]
-        _run(["docker", "run", "-d", "--rm", "--name", _NAME, *ports, self.image])
+        env = [arg for k, v in self.env.items() for arg in ("-e", f"{k}={v}")]
+        _run(["docker", "run", "-d", "--rm", "--name", _NAME, *ports, *env, self.image])
 
     def _start_udocker(self) -> None:
         udocker = shutil.which("udocker")
@@ -153,7 +162,7 @@ class BackendContainer:
 
         log = self.log_path.open("wb")
         self._proc = subprocess.Popen(
-            base + ["run", _NAME],
+            base + ["run", *(f"--env={k}={v}" for k, v in self.env.items()), _NAME],
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
