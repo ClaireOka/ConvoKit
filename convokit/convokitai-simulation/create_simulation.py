@@ -35,7 +35,6 @@ Requirements:
 
 from __future__ import annotations
 
-import copy
 import itertools
 import os
 import sys
@@ -131,155 +130,17 @@ CMV_RULES = {
 }
 
 
-def _stage_context_item(stage_id: str) -> dict:
-    """utils/src/structured_prompt.ts createDefaultStageContextPromptItem"""
-    return {
-        "type": "STAGE_CONTEXT",
-        "stageId": stage_id,
-        "includePrimaryText": True,
-        "includeInfoText": False,
-        "includeHelpText": False,
-        "includeParticipantAnswers": True,
-        "includeStageDisplay": True,
-    }
+# Added to an agent prompt that has no instructions of its own (e.g. only CONTEXT items), which
+# would otherwise leave the model with nothing to do, so the agent never speaks.
+DEFAULT_AGENT_INSTRUCTIONS = (
+    "You are the participant above in a live online conversation. Reply to the conversation "
+    "in character with a short, natural 1-2 sentence message."
+)
 
-
-# Deliberate Lab's default agent participant chat prompt config
-# (utils/src/stages/chat_stage.manager.ts getDefaultParticipantStructuredPrompt), which the
-# backend falls back to when an agent has no stored prompt. It is stored explicitly instead,
-# because the backend's initializationContextPrompt step writes its result into the stored
-# prompt doc and throws if there is none, which stops every agent's opening message.
-DEFAULT_PARTICIPANT_PROMPT_CONFIG = {
-    "id": CHAT_STAGE_ID,
-    "type": "chat",
-    "prompt": [
-        {
-            "type": "TEXT",
-            "text": (
-                "You are a human participant interacting in an online task with multiple "
-                "stages. In this query, you will provide an action for the current stage - "
-                "for example, participating in a live chat, answering survey questions, or "
-                "acknowledging information. Respond as this participant in order to move the "
-                "task forward.\n"
-            ),
-        },
-        {"type": "TEXT", "text": "--- Participant description ---"},
-        {"type": "PROFILE_INFO"},
-        {"type": "PROFILE_CONTEXT"},
-        _stage_context_item(""),
-        {
-            "type": "TEXT",
-            "text": (
-                "Decide if your human persona would respond at this point in the live "
-                "conversation. If yes, give a natural response that fits the persona and any "
-                "earlier style rules. If no style rules exist, default to a short 1–2 sentence "
-                "online-style message. If they would not respond, stay silent. Stay in character."
-            ),
-        },
-    ],
-    # with no order, the backend runs one pipeline step per key of prompt (per item of a list)
-    "order": {1: ["default"]},
-    "addTo": {},
-    "includeScaffoldingInPrompt": True,
-    "includeConcessionInPrompt": False,
-    "includeThoughtHistory": [],
-    "includePersona": [],
-    "numRetries": 0,
-    "generationConfig": {
-        "includeReasoning": False,
-        "disableSafetyFilters": False,
-        "customRequestBodyFields": [],
-    },
-    "structuredOutputConfig": {
-        "enabled": True,
-        "type": "JSON_SCHEMA",
-        "schema": {
-            "type": "OBJECT",
-            "properties": [
-                {
-                    "name": "explanation",
-                    "schema": {
-                        "type": "STRING",
-                        "description": (
-                            "1-2 sentences explaining why you are sending this message, or why you "
-                            "are staying silent, based on your persona and the chat context."
-                        ),
-                    },
-                },
-                {
-                    "name": "shouldRespond",
-                    "schema": {
-                        "type": "BOOLEAN",
-                        "description": "True if you will send a message, False if you prefer to stay silent.",
-                    },
-                },
-                {"name": "response", "schema": {"type": "STRING", "description": "Your chat message."}},
-                {
-                    "name": "readyToEndChat",
-                    "schema": {
-                        "type": "BOOLEAN",
-                        "description": (
-                            "Whether or not you completed your goals and are ready to end the conversation."
-                        ),
-                    },
-                },
-            ],
-        },
-        "appendToPrompt": True,
-        "shouldRespondField": "shouldRespond",
-        "messageField": "response",
-        "explanationField": "explanation",
-        "readyToEndField": "readyToEndChat",
-        "shouldConcedeField": "shouldConcede",
-    },
-    # utils/src/agent.ts createParticipantChatSettings
-    "chatSettings": {
-        "wordsPerMinute": 80,
-        "minMessagesBeforeResponding": 0,
-        "canSelfTriggerCalls": False,
-        "maxResponses": 100,
-        "initialMessage": "",
-        "initializationContextPrompt": [
-            {
-                "type": "TEXT",
-                "text": "Based on the context, return relevant information related to the conversation topic.",
-            }
-        ],
-        "initializationInformation": "",
-        "shouldRespondPrompt": [
-            {
-                "type": "TEXT",
-                "text": "Based on the conversation transcript, should the mediator respond to the current message?",
-            },
-            _stage_context_item(""),
-            {"type": "TEXT", "text": "Respond with ONLY 'YES' or 'NO'. Do not provide reasoning."},
-        ],
-        "minParticipantMessagesBeforeResponding": 3,
-        "concedeStrength": 4,
-        "shouldConcedePrompt": [
-            {
-                "type": "TEXT",
-                "text": (
-                    "Based on the conversation transcript, rate the strength of the opposing argument "
-                    "from 0-1 with 0 being the weakest and 1 being the strongest. Also provide a short "
-                    "one sentence reasoning for the rating."
-                ),
-            },
-            _stage_context_item(""),
-            {
-                "type": "TEXT",
-                "text": (
-                    "Return ONLY a single JSON object on one line, with no markdown fences, no prose, "
-                    'and no extra keys: {"concessionScore": <float between 0 and 1>, '
-                    '"concessionScoreReason": "<one short line>"}'
-                ),
-            },
-        ],
-        "thoughtPrompt": None,
-        "characterPrompt": None,
-    },
-}
-
+# Deployed Deliberate Lab backends from before TrAuSt 2da6892 run a thought call on every agent
+# participant turn and crash if this prompt is missing. The stub keeps the call cheap (newer
+# backends only record the thought).
+AGENT_THOUGHT_PROMPT = [{"type": "TEXT", "text": 'Return exactly this JSON and nothing else: {"thought": ""}'}]
 
 @dataclass
 class _PromptContext:
@@ -543,10 +404,16 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
         item["type"] == "TEXT" and item["text"].strip() for items in prompts.values() for item in items
     )
     if not has_instructions:
-        # A prompt with no text (e.g. only CONTEXT) tells the model to do nothing, so the agent
-        # stays silent. Use the backend's default agent participant prompt instead (instructions,
-        # transcript, and shouldRespond structured output), like the toolkit.
-        return {"persona": persona, "promptMap": {CHAT_STAGE_ID: copy.deepcopy(DEFAULT_PARTICIPANT_PROMPT_CONFIG)}}
+        # the last pipeline step writes the chat message
+        key = order[max(order)][-1]
+        prompts[key] = [
+            {"type": "PROFILE_INFO"},
+            *prompts[key],
+            {"type": "TEXT", "text": DEFAULT_AGENT_INSTRUCTIONS},
+        ]
+
+    chat_settings = _chat_settings(settings)
+    chat_settings["thoughtPrompt"] = AGENT_THOUGHT_PROMPT
 
     prompt_config = {
         "id": CHAT_STAGE_ID,
@@ -563,7 +430,7 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
             _get(content, "structured_output") or _get(settings, "structured_output")
         ),
         "generationConfig": _generation(content),
-        "chatSettings": _chat_settings(settings),
+        "chatSettings": chat_settings,
         "numRetries": _get(settings, "num_retries", _get(content, "num_retries")),
     }
     return {"persona": persona, "promptMap": {CHAT_STAGE_ID: prompt_config}}
