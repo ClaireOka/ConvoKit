@@ -96,6 +96,16 @@ class Conversation(BaseConversation):
                 return assistant
         raise KeyError(assistant_id)
 
+    def get_ai_speakers(self) -> List[str]:
+        """
+        Get the ids of the speakers in this conversation that are AI (is_ai is True).
+
+        :return: a list of speaker ids (empty if there are no AI speakers)
+        """
+        return [
+            speaker.id for speaker in self.iter_speakers() if getattr(speaker, "is_ai", False)
+        ]
+
     @property
     def supports(self) -> List[Support]:
         if "supports" in self.ai_meta:
