@@ -10,7 +10,14 @@ import json
 import os
 from typing import Dict, List, Optional
 
-from .aiUtil import AI_META_KEYS, LEGACY_AI_KEYS, LEGACY_CORPUS_KEYS, as_dict, normalize_for_dump
+from .aiUtil import (
+    AI_META_KEYS,
+    LEGACY_AI_KEYS,
+    LEGACY_CORPUS_KEYS,
+    as_dict,
+    legacy_ai_keys,
+    normalize_for_dump,
+)
 from .assistant import Assistant
 from .conversation import Conversation
 from .speaker import Speaker
@@ -62,7 +69,7 @@ def upgrade_components(corpus) -> None:
             return converted
 
         if _unlocked_meta_deletion(corpus, obj_type, convert):
-            for key in set(LEGACY_AI_KEYS) | set(AI_META_KEYS[obj_type]):
+            for key in set(legacy_ai_keys(obj_type)) | set(AI_META_KEYS[obj_type]):
                 corpus.meta_index.del_from_index(obj_type, key)
 
 
@@ -133,6 +140,30 @@ def migrate_legacy_assistants_and_supports(corpus, assistants, supports: List[Di
             convo = corpus.get_conversation(assistant.conversation_id)
             if assistant.id not in {a.id for a in convo.assistants}:
                 convo.assistants = convo.assistants + [assistant]
+
+
+def link_support_copies(corpus) -> None:
+    """
+    Make the copies of each Support stored in a Conversation (on its Assistants, in its ai_meta["supports"],
+    and on the Utterances they reply to) the same object, so that changes to one of them (e.g. to its meta)
+    show up in all of them. Loading a corpus otherwise creates a separate copy for each place it is stored.
+    """
+    if not hasattr(corpus, "conversations"):
+        return
+
+    for convo in corpus.iter_conversations():
+        by_id = {}
+
+        def link(supports):
+            return [s if s.id is None else by_id.setdefault(s.id, s) for s in supports]
+
+        for assistant in convo.assistants:
+            assistant.supports = link(assistant.supports)
+        if "supports" in convo.ai_meta:
+            convo.supports = link(convo.supports)
+        for utt in convo.iter_utterances():
+            if "supports" in utt.ai_meta:
+                utt.supports = link(utt.supports)
 
 
 def stash_ai_fields_in_meta(corpus) -> None:

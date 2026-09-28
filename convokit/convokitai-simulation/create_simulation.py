@@ -137,9 +137,6 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "in character with a short, natural 1-2 sentence message."
 )
 
-# Deployed Deliberate Lab backends from before TrAuSt 2da6892 run a thought call on every agent
-# participant turn and crash if this prompt is missing. The stub keeps the call cheap (newer
-# backends only record the thought).
 AGENT_THOUGHT_PROMPT = [{"type": "TEXT", "text": 'Return exactly this JSON and nothing else: {"thought": ""}'}]
 
 @dataclass

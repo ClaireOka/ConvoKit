@@ -41,6 +41,8 @@ class SCD(Transformer):
     :param conversation_formatter: Optional function to format conversations for processing.
         Should take a Conversation object and return a string. If None, uses default formatting.
     :param llm_kwargs: Additional keyword arguments to pass to the LLM client
+    :param include_supports: For convokitai conversations, whether the default formatting includes the
+        Supports of the conversation's Assistants in the transcript (default: False)
     """
 
     # Class variables for lazy loading of prompts
@@ -75,6 +77,7 @@ class SCD(Transformer):
         sop_metadata_name: str = "machine_sop",
         conversation_formatter: Optional[Callable[[Conversation], str]] = None,
         llm_kwargs: Optional[dict] = None,
+        include_supports: bool = False,
     ):
         if not GENAI_AVAILABLE:
             raise ImportError(
@@ -91,6 +94,7 @@ class SCD(Transformer):
         self.sop_metadata_name = sop_metadata_name
         self.conversation_formatter = conversation_formatter
         self.llm_kwargs = llm_kwargs or {}
+        self.include_supports = include_supports
 
         # Load default prompts
         self._load_prompts()
@@ -120,15 +124,21 @@ class SCD(Transformer):
     def _default_conversation_formatter(self, conversation: Conversation) -> str:
         """
         Default conversation formatter that creates a transcript from conversation utterances.
+        Speakers of convokitai conversations are referred to by their aliases, and their Supports
+        are included if include_supports is True.
 
         :param conversation: The conversation to format
         :return: Formatted transcript string
         """
+        if self.include_supports and hasattr(conversation, "get_transcript_entries"):
+            return conversation.get_transcript(supports=True)
+
         utterances = conversation.get_chronological_utterance_list()
+        alias = getattr(conversation, "alias", {})
         transcript_parts = []
 
         for utt in utterances:
-            speaker_name = f"Speaker_{utt.speaker.id}"
+            speaker_name = f"Speaker_{alias.get(utt.speaker.id, utt.speaker.id)}"
             transcript_parts.append(f"{speaker_name}: {utt.text}")
 
         return "\n".join(transcript_parts)

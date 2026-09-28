@@ -28,6 +28,19 @@ LEGACY_CORPUS_KEYS = ("supports", "assistants")
 # keys from earlier iterations of the format that are dropped on load
 LEGACY_AI_KEYS = ("ai_meta", "is_ai", "has_ai", "role", "sender_name", "agent_id")
 
+# legacy keys that are also regular utterance metadata in other corpora (e.g. "role", used by
+# convokit.redirection), so they are kept on utterances
+UTTERANCE_META_KEYS = ("role",)
+
+
+def legacy_ai_keys(obj_type: str) -> Tuple[str, ...]:
+    """
+    The keys in LEGACY_AI_KEYS that are dropped on load for the given object type.
+    """
+    if obj_type == "utterance":
+        return tuple(key for key in LEGACY_AI_KEYS if key not in UTTERANCE_META_KEYS)
+    return LEGACY_AI_KEYS
+
 
 def strip_keys(meta: Optional[Dict], keys: Iterable[str]) -> Dict:
     cleaned = dict(meta or {})

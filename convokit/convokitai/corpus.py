@@ -8,6 +8,7 @@ from .assistant import Assistant
 from .conversation import Conversation
 from .corpus_helpers import (
     extract_corpus_ai_fields,
+    link_support_copies,
     migrate_legacy_assistants_and_supports,
     stash_ai_fields_in_meta,
     unstash_ai_fields_from_meta,
@@ -55,7 +56,7 @@ class Corpus(BaseCorpus):
         """
         Convert all components to convokitai objects and move the corpus-level AI fields out of
         corpus.meta into attributes. Corpus-level assistants / supports from earlier iterations of
-        the format are moved onto their conversations.
+        the format are moved onto their conversations, and copies of the same Support are linked.
         """
         self._has_ai = None
         self._ai_meta = {}
@@ -67,6 +68,7 @@ class Corpus(BaseCorpus):
         migrate_legacy_assistants_and_supports(
             self, fields["legacy_assistants"], fields["legacy_supports"]
         )
+        link_support_copies(self)
 
     @classmethod
     def load(cls, filename: str, **kwargs) -> "Corpus":

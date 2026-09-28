@@ -14,6 +14,7 @@ class Assistant:
     :param supports: the Supports (or their dict forms) produced by this assistant
     :param speakers: ids of the Speakers that can see this assistant's Supports
     :param conversation_id: id of the Conversation the assistant belongs to
+    :param meta: other metadata of the assistant, e.g. outputs of transformers run on it
     """
 
     def __init__(
@@ -23,12 +24,20 @@ class Assistant:
         supports: Optional[Iterable] = None,
         speakers: Optional[Iterable[str]] = None,
         conversation_id: Optional[str] = None,
+        meta: Optional[Dict] = None,
     ):
         self.id = id
         self.config = config or {}
         self.supports: List[Support] = Support.normalize_list(supports)
         self.speakers = list(speakers or [])
         self.conversation_id = conversation_id
+        self.meta = dict(meta or {})
+
+    def add_meta(self, key: str, value) -> None:
+        """
+        Add a key-value pair to the assistant's metadata.
+        """
+        self.meta[key] = value
 
     def to_dict(self) -> Dict:
         return {
@@ -37,6 +46,7 @@ class Assistant:
             "supports": [support.to_dict() for support in self.supports],
             "speakers": list(self.speakers),
             "conversation_id": self.conversation_id,
+            "meta": dict(self.meta),
         }
 
     @classmethod
@@ -49,6 +59,7 @@ class Assistant:
             supports=data.get("supports") or [],
             speakers=data.get("speakers") or [],
             conversation_id=data.get("conversation_id"),
+            meta=data.get("meta") or {},
         )
 
     @staticmethod
@@ -110,16 +121,18 @@ class Assistant:
                 reply_to = generation.last_utterance_id(conversation)
             if reply_to is not None:
                 # end with the last support already given for this reply, if any
-                until = generation.last_support(conversation, reply_to) or conversation.get_utterance(
-                    reply_to
-                )
+                until = generation.last_support(
+                    conversation, reply_to
+                ) or conversation.get_utterance(reply_to)
                 transcript = conversation.get_transcript(supports=True, until=until)
 
         instruction = ""
         if draft:
             instruction += "The draft of the reply written so far:\n{}\n\n".format(draft)
-        instruction += "Write your support message{}. Respond with only the text of the message.".format(
-            " to " + ", ".join(viewers) if viewers else ""
+        instruction += (
+            "Write your support message{}. Respond with only the text of the message.".format(
+                " to " + ", ".join(viewers) if viewers else ""
+            )
         )
         text = generation.call_llm(
             generation.get_client(config, client, config_manager),
@@ -133,7 +146,9 @@ class Assistant:
             reply_to=reply_to,
             draft=draft,
             assistant_id=self.id,
-            timestamp=timestamp if timestamp is not None else generation.next_timestamp(conversation),
+            timestamp=(
+                timestamp if timestamp is not None else generation.next_timestamp(conversation)
+            ),
         )
         if append:
             self.supports.append(support)

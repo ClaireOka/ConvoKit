@@ -7,6 +7,7 @@
 | `Support[]` | `list` | List of support objects |
 | `speakers` | `list` | List of speakers that can see this Assistant's supports |
 | `conversation_id` | `string` | id of conversation |
+| `meta` | `dict` | Other metadata, e.g. outputs of transformers run on the assistant (such as `LLMPromptTransformer`) |
 
 config example
 ```python
@@ -27,6 +28,9 @@ config example
 | `draft` | `string` | The draft of the post that the assisted speaker has written so far. empty string means draft is empty  |
 | `assistant_id` | `string` | id of assistant |
 | `timestamp` | `string` | The timestamp the message was sent  |
+| `meta` | `dict` | Other metadata, e.g. outputs of transformers run on the support (such as `LLMPromptTransformer`) |
+
+A support can be stored in several places of a conversation (its assistant's `Support[]`, the conversation's `Support[]`, and the `Support[]` of the utterance it replies to). On load, these copies are linked into one object, so changes to one of them (e.g. to its `meta`) show up in all of them.
 
 ## Speaker
 | Field     | Type     | Description                           |

@@ -25,6 +25,8 @@ class ConDynS:
     :param model: Optional specific model name
     :param custom_condyns_prompt: Custom prompt for the condyns prompt template
     :param custom_prompt_dir: Directory to save custom prompts (if not provided, overwrites default prompts in ./prompts)
+    :param include_supports: For convokitai conversations, whether the default transcript formatting includes
+        the Supports of the conversation's Assistants (default: False)
     """
 
     CONDYNS_PROMPT_TEMPLATE = None
@@ -46,6 +48,7 @@ class ConDynS:
         model: str = None,
         custom_condyns_prompt: str = None,
         custom_prompt_dir: str = None,
+        include_supports: bool = False,
     ):
         """Initialize the ConDynS score calculator with a specified model provider and optional model name.
 
@@ -56,6 +59,8 @@ class ConDynS:
         :param model: Optional specific model name
         :param custom_condyns_prompt: Custom prompt for the condyns prompt template
         :param custom_prompt_dir: Directory to save custom prompts (if not provided, overwrites defaults in ./prompts)
+        :param include_supports: For convokitai conversations, whether the default transcript formatting
+            includes the Supports of the conversation's Assistants
         :raises ImportError: If genai dependencies are not available
         """
         if not GENAI_AVAILABLE:
@@ -67,6 +72,7 @@ class ConDynS:
         self.config = config
         self.model = model
         self.custom_prompt_dir = custom_prompt_dir
+        self.include_supports = include_supports
 
         # Load default prompts first
         self._load_prompts()
@@ -232,24 +238,42 @@ class ConDynS:
         """Format a ConvoKit conversation into a transcript string.
 
         Converts a conversation into a formatted transcript suitable for ConDynS analysis.
-        Uses chronological order and assigns speaker labels.
+        Uses chronological order and assigns speaker labels. If include_supports is True, the Supports
+        of a convokitai conversation are included after the utterance they reply to, labeled with their
+        assistant (ASSISTANT1, ASSISTANT2, etc.) and the speakers that can see them.
 
         :param conversation: ConvoKit Conversation object
         :return: Formatted transcript string
         """
-        utt_list = conversation.get_chronological_utterance_list()
+        if self.include_supports and hasattr(conversation, "get_transcript_entries"):
+            entries = conversation.get_transcript_entries(supports=True)
+            assistants = {assistant.id: assistant for assistant in conversation.assistants}
+        else:
+            entries = conversation.get_chronological_utterance_list()
+            assistants = {}
         transcript_lines = []
         speaker_map = {}
-        speaker_counter = 1
+        assistant_map = {}
 
-        for utt in utt_list:
+        def speaker_label(speaker_id):
             # Assign speaker labels (SPEAKER1, SPEAKER2, etc.)
-            if utt.speaker.id not in speaker_map:
-                speaker_map[utt.speaker.id] = f"SPEAKER{speaker_counter}"
-                speaker_counter += 1
+            if speaker_id not in speaker_map:
+                speaker_map[speaker_id] = f"SPEAKER{len(speaker_map) + 1}"
+            return speaker_map[speaker_id]
 
-            speaker_label = speaker_map[utt.speaker.id]
-            transcript_lines.append(f"{speaker_label}: {utt.text}")
+        for entry in entries:
+            if hasattr(entry, "assistant_id"):
+                # a Support
+                if entry.assistant_id not in assistant_map:
+                    assistant_map[entry.assistant_id] = f"ASSISTANT{len(assistant_map) + 1}"
+                assistant = assistants.get(entry.assistant_id)
+                viewers = [speaker_label(s) for s in (assistant.speakers if assistant else [])]
+                label = assistant_map[entry.assistant_id]
+                if viewers:
+                    label += f" (to {', '.join(viewers)})"
+                transcript_lines.append(f"{label}: {entry.text}")
+            else:
+                transcript_lines.append(f"{speaker_label(entry.speaker.id)}: {entry.text}")
 
         return " ".join(transcript_lines)
 

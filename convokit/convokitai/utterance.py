@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional
 
 from convokit.model import Utterance as BaseUtterance
-from .aiUtil import AI_META_KEYS, LEGACY_AI_KEYS, as_dict, split_ai_fields
+from .aiUtil import AI_META_KEYS, as_dict, legacy_ai_keys, split_ai_fields
 from .speaker import Speaker
 from .support import Support
 
@@ -58,7 +58,7 @@ class Utterance(BaseUtterance):
         """
         utt.__class__ = cls
         utt.ai_meta = as_dict(utt.meta.get("ai_meta"))
-        for key in set(LEGACY_AI_KEYS) | set(AI_META_KEYS["utterance"]):
+        for key in set(legacy_ai_keys("utterance")) | set(AI_META_KEYS["utterance"]):
             if key in utt.meta:
                 del utt.meta[key]
         return utt

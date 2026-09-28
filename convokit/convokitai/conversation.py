@@ -102,9 +102,7 @@ class Conversation(BaseConversation):
 
         :return: a list of speaker ids (empty if there are no AI speakers)
         """
-        return [
-            speaker.id for speaker in self.iter_speakers() if getattr(speaker, "is_ai", False)
-        ]
+        return [speaker.id for speaker in self.iter_speakers() if getattr(speaker, "is_ai", False)]
 
     @property
     def supports(self) -> List[Support]:
@@ -116,10 +114,14 @@ class Conversation(BaseConversation):
     def supports(self, value):
         self.ai_meta = {"supports": value}
 
-    def __transcript_entries(self, supports: bool) -> List:
+    def get_transcript_entries(self, supports: bool = False) -> List:
         """
-        The Utterances of the conversation ordered by timestamp, with (if `supports` is True) each Support
+        Get the Utterances of the conversation ordered by timestamp, with (if `supports` is True) each Support
         right after the utterance it replies to (Supports without a reply_to in this conversation come first).
+        This is the order used by get_transcript(), for building transcripts in other formats.
+
+        :param supports: whether to include Supports
+        :return: a list of Utterances and Supports
         """
         utterances = sorted(self.iter_utterances(), key=transcript_sort_key)
         if not supports:
@@ -150,7 +152,7 @@ class Conversation(BaseConversation):
             (inclusive). A Support given here is always shown, even if `supports` is False.
         :return: the transcript as a single string
         """
-        entries = self.__transcript_entries(supports or isinstance(until, Support))
+        entries = self.get_transcript_entries(supports or isinstance(until, Support))
         if isinstance(until, Support) and not supports:
             entries = [e for e in entries if not isinstance(e, Support) or e.id == until.id]
         if until is not None:

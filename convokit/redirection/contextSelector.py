@@ -1,4 +1,4 @@
-from .preprocessing import default_speaker_prefixes
+from .preprocessing import default_speaker_prefixes, get_role
 
 
 def default_previous_context_selector(convo):
@@ -16,7 +16,7 @@ def default_previous_context_selector(convo):
     actual_contexts = {}
     reference_contexts = {}
     utts = [utt for utt in convo.iter_utterances()]
-    roles = list({utt.meta["role"] for utt in utts})
+    roles = list({get_role(utt) for utt in utts})
     assert len(roles) == 2
     spk_prefixes = default_speaker_prefixes(roles)
     role_to_prefix = {roles[i]: spk_prefixes[i] for i in range(len(roles))}
@@ -26,7 +26,7 @@ def default_previous_context_selector(convo):
     prev_1, prev_2, cur_1, cur_2 = None, None, None, None
     for i, utt in enumerate(utts):
         utt_text = utt.text
-        cur_spk = utt.meta["role"]
+        cur_spk = get_role(utt)
         if prev_spk is not None and cur_spk != prev_spk:
             if role_2 in cur_spk:
                 prev_1 = cur_1
@@ -74,7 +74,7 @@ def default_future_context_selector(convo):
     cur_1 = None
     cur_2 = None
     utts = [utt for utt in convo.iter_utterances()]
-    roles = list({utt.meta["role"] for utt in utts})
+    roles = list({get_role(utt) for utt in utts})
     assert len(roles) == 2
     spk_prefixes = default_speaker_prefixes(roles)
     role_to_prefix = {roles[i]: spk_prefixes[i] for i in range(len(roles))}
@@ -84,7 +84,7 @@ def default_future_context_selector(convo):
     for i in range(n - 1, -1, -1):
         utt = utts[i]
         utt_text = utt.text
-        cur_spk = utt.meta["role"]
+        cur_spk = get_role(utt)
         if role_2 in cur_spk:
             cur_2 = (utt_text, cur_spk)
             if cur_1 is not None:

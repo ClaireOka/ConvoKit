@@ -12,6 +12,7 @@ class Support:
     :param draft: the draft of the post the assisted speaker has written so far ("" means the draft is empty)
     :param assistant_id: id of the Assistant that produced the support
     :param timestamp: the timestamp the support was sent
+    :param meta: other metadata of the support, e.g. outputs of transformers run on it
     """
 
     def __init__(
@@ -22,6 +23,7 @@ class Support:
         draft: str = "",
         assistant_id: Optional[str] = None,
         timestamp: Union[str, int, None] = None,
+        meta: Optional[Dict] = None,
     ):
         self.id = id
         self.text = text
@@ -29,6 +31,13 @@ class Support:
         self.draft = draft if draft is not None else ""
         self.assistant_id = assistant_id
         self.timestamp = timestamp
+        self.meta = dict(meta or {})
+
+    def add_meta(self, key: str, value) -> None:
+        """
+        Add a key-value pair to the support's metadata.
+        """
+        self.meta[key] = value
 
     def to_dict(self) -> Dict:
         return {
@@ -38,6 +47,7 @@ class Support:
             "draft": self.draft,
             "assistant_id": self.assistant_id,
             "timestamp": self.timestamp,
+            "meta": dict(self.meta),
         }
 
     @classmethod
@@ -54,6 +64,7 @@ class Support:
             draft=data.get("draft", ""),
             assistant_id=data.get("assistant_id"),
             timestamp=data.get("timestamp"),
+            meta=data.get("meta") or {},
         )
 
     @staticmethod

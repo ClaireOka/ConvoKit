@@ -1,6 +1,27 @@
 from datasets import Dataset
 
 
+def get_role(utt):
+    """
+    Gets the speaker role of an utterance: its "role" metadata, or for a
+    convokitai corpus, the role of its speaker (speaker.ai_meta["role"]).
+
+    :param utt: Utterance to get the role of
+
+    :return: Role of the utterance's speaker
+    """
+    if "role" in utt.meta:
+        return utt.meta["role"]
+    role = getattr(utt.speaker, "ai_meta", {}).get("role")
+    if role is None:
+        role = utt.speaker.meta.get("role")
+    if role is None:
+        raise KeyError(
+            "No role found for utterance {!r} in its metadata or its speaker's".format(utt.id)
+        )
+    return role
+
+
 def default_speaker_prefixes(roles):
     """
     Gemerates speaker prefixes for speaker roles.
@@ -25,12 +46,12 @@ def format_conversations(convos):
     formatted_convos = []
     for convo in convos:
         utts = [utt for utt in convo.iter_utterances()]
-        roles = list({utt.meta["role"] for utt in utts})
+        roles = list({get_role(utt) for utt in utts})
         spk_prefixes = default_speaker_prefixes(roles)
         role_to_prefix = {roles[i]: spk_prefixes[i] for i in range(len(roles))}
         formatted_utts = []
         for utt in utts:
-            utt_text = role_to_prefix[utt.meta["role"]] + utt.text
+            utt_text = role_to_prefix[get_role(utt)] + utt.text
             formatted_utts.append(utt_text)
         formatted_convo = "\n\n".join(formatted_utts)
         formatted_convos.append(formatted_convo)

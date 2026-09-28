@@ -114,6 +114,7 @@ class Redirection(Transformer):
 
     def fit_transform(
         self,
+        corpus,
         train_selector=lambda convo: True,
         val_selector=lambda convo: True,
         test_selector=lambda convo: True,
