@@ -35,6 +35,7 @@ Requirements:
 
 from __future__ import annotations
 
+import copy
 import itertools
 import os
 import sys
@@ -127,6 +128,157 @@ CMV_RULES = {
         "Rule 5 - Doesn't Contribute Meaningfully",
         'Comments must contain human-generated content and contribute meaningfully to the conversation. Comments that are only links, jokes, or "written upvotes" will be removed. Humor and affirmations of agreement can be contained within more substantial comments.',
     ),
+}
+
+
+def _stage_context_item(stage_id: str) -> dict:
+    """utils/src/structured_prompt.ts createDefaultStageContextPromptItem"""
+    return {
+        "type": "STAGE_CONTEXT",
+        "stageId": stage_id,
+        "includePrimaryText": True,
+        "includeInfoText": False,
+        "includeHelpText": False,
+        "includeParticipantAnswers": True,
+        "includeStageDisplay": True,
+    }
+
+
+# Deliberate Lab's default agent participant chat prompt config
+# (utils/src/stages/chat_stage.manager.ts getDefaultParticipantStructuredPrompt), which the
+# backend falls back to when an agent has no stored prompt. It is stored explicitly instead,
+# because the backend's initializationContextPrompt step writes its result into the stored
+# prompt doc and throws if there is none, which stops every agent's opening message.
+DEFAULT_PARTICIPANT_PROMPT_CONFIG = {
+    "id": CHAT_STAGE_ID,
+    "type": "chat",
+    "prompt": {
+        "default": [
+            {
+                "type": "TEXT",
+                "text": (
+                    "You are a human participant interacting in an online task with multiple "
+                    "stages. In this query, you will provide an action for the current stage - "
+                    "for example, participating in a live chat, answering survey questions, or "
+                    "acknowledging information. Respond as this participant in order to move the "
+                    "task forward.\n"
+                ),
+            },
+            {"type": "TEXT", "text": "--- Participant description ---"},
+            {"type": "PROFILE_INFO"},
+            {"type": "PROFILE_CONTEXT"},
+            _stage_context_item(""),
+            {
+                "type": "TEXT",
+                "text": (
+                    "Decide if your human persona would respond at this point in the live "
+                    "conversation. If yes, give a natural response that fits the persona and any "
+                    "earlier style rules. If no style rules exist, default to a short 1–2 sentence "
+                    "online-style message. If they would not respond, stay silent. Stay in character."
+                ),
+            },
+        ]
+    },
+    "order": {},
+    "addTo": {},
+    "includeScaffoldingInPrompt": True,
+    "includeConcessionInPrompt": False,
+    "includeThoughtHistory": [],
+    "includePersona": [],
+    "numRetries": 0,
+    "generationConfig": {
+        "includeReasoning": False,
+        "disableSafetyFilters": False,
+        "customRequestBodyFields": [],
+    },
+    "structuredOutputConfig": {
+        "enabled": True,
+        "type": "JSON_SCHEMA",
+        "schema": {
+            "type": "OBJECT",
+            "properties": [
+                {
+                    "name": "explanation",
+                    "schema": {
+                        "type": "STRING",
+                        "description": (
+                            "1-2 sentences explaining why you are sending this message, or why you "
+                            "are staying silent, based on your persona and the chat context."
+                        ),
+                    },
+                },
+                {
+                    "name": "shouldRespond",
+                    "schema": {
+                        "type": "BOOLEAN",
+                        "description": "True if you will send a message, False if you prefer to stay silent.",
+                    },
+                },
+                {"name": "response", "schema": {"type": "STRING", "description": "Your chat message."}},
+                {
+                    "name": "readyToEndChat",
+                    "schema": {
+                        "type": "BOOLEAN",
+                        "description": (
+                            "Whether or not you completed your goals and are ready to end the conversation."
+                        ),
+                    },
+                },
+            ],
+        },
+        "appendToPrompt": True,
+        "shouldRespondField": "shouldRespond",
+        "messageField": "response",
+        "explanationField": "explanation",
+        "readyToEndField": "readyToEndChat",
+        "shouldConcedeField": "shouldConcede",
+    },
+    # utils/src/agent.ts createParticipantChatSettings
+    "chatSettings": {
+        "wordsPerMinute": 80,
+        "minMessagesBeforeResponding": 0,
+        "canSelfTriggerCalls": False,
+        "maxResponses": 100,
+        "initialMessage": "",
+        "initializationContextPrompt": [
+            {
+                "type": "TEXT",
+                "text": "Based on the context, return relevant information related to the conversation topic.",
+            }
+        ],
+        "initializationInformation": "",
+        "shouldRespondPrompt": [
+            {
+                "type": "TEXT",
+                "text": "Based on the conversation transcript, should the mediator respond to the current message?",
+            },
+            _stage_context_item(""),
+            {"type": "TEXT", "text": "Respond with ONLY 'YES' or 'NO'. Do not provide reasoning."},
+        ],
+        "minParticipantMessagesBeforeResponding": 3,
+        "concedeStrength": 4,
+        "shouldConcedePrompt": [
+            {
+                "type": "TEXT",
+                "text": (
+                    "Based on the conversation transcript, rate the strength of the opposing argument "
+                    "from 0-1 with 0 being the weakest and 1 being the strongest. Also provide a short "
+                    "one sentence reasoning for the rating."
+                ),
+            },
+            _stage_context_item(""),
+            {
+                "type": "TEXT",
+                "text": (
+                    "Return ONLY a single JSON object on one line, with no markdown fences, no prose, "
+                    'and no extra keys: {"concessionScore": <float between 0 and 1>, '
+                    '"concessionScoreReason": "<one short line>"}'
+                ),
+            },
+        ],
+        "thoughtPrompt": None,
+        "characterPrompt": None,
+    },
 }
 
 
@@ -393,9 +545,9 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
     )
     if not has_instructions:
         # A prompt with no text (e.g. only CONTEXT) tells the model to do nothing, so the agent
-        # stays silent. With no prompt, the backend uses its default agent participant prompt
-        # (instructions, transcript, and shouldRespond structured output), like the toolkit.
-        return {"persona": persona, "promptMap": {}}
+        # stays silent. Use the backend's default agent participant prompt instead (instructions,
+        # transcript, and shouldRespond structured output), like the toolkit.
+        return {"persona": persona, "promptMap": {CHAT_STAGE_ID: copy.deepcopy(DEFAULT_PARTICIPANT_PROMPT_CONFIG)}}
 
     prompt_config = {
         "id": CHAT_STAGE_ID,
