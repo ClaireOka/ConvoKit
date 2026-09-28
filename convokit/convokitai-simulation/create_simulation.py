@@ -152,34 +152,33 @@ def _stage_context_item(stage_id: str) -> dict:
 DEFAULT_PARTICIPANT_PROMPT_CONFIG = {
     "id": CHAT_STAGE_ID,
     "type": "chat",
-    "prompt": {
-        "default": [
-            {
-                "type": "TEXT",
-                "text": (
-                    "You are a human participant interacting in an online task with multiple "
-                    "stages. In this query, you will provide an action for the current stage - "
-                    "for example, participating in a live chat, answering survey questions, or "
-                    "acknowledging information. Respond as this participant in order to move the "
-                    "task forward.\n"
-                ),
-            },
-            {"type": "TEXT", "text": "--- Participant description ---"},
-            {"type": "PROFILE_INFO"},
-            {"type": "PROFILE_CONTEXT"},
-            _stage_context_item(""),
-            {
-                "type": "TEXT",
-                "text": (
-                    "Decide if your human persona would respond at this point in the live "
-                    "conversation. If yes, give a natural response that fits the persona and any "
-                    "earlier style rules. If no style rules exist, default to a short 1–2 sentence "
-                    "online-style message. If they would not respond, stay silent. Stay in character."
-                ),
-            },
-        ]
-    },
-    "order": {},
+    "prompt": [
+        {
+            "type": "TEXT",
+            "text": (
+                "You are a human participant interacting in an online task with multiple "
+                "stages. In this query, you will provide an action for the current stage - "
+                "for example, participating in a live chat, answering survey questions, or "
+                "acknowledging information. Respond as this participant in order to move the "
+                "task forward.\n"
+            ),
+        },
+        {"type": "TEXT", "text": "--- Participant description ---"},
+        {"type": "PROFILE_INFO"},
+        {"type": "PROFILE_CONTEXT"},
+        _stage_context_item(""),
+        {
+            "type": "TEXT",
+            "text": (
+                "Decide if your human persona would respond at this point in the live "
+                "conversation. If yes, give a natural response that fits the persona and any "
+                "earlier style rules. If no style rules exist, default to a short 1–2 sentence "
+                "online-style message. If they would not respond, stay silent. Stay in character."
+            ),
+        },
+    ],
+    # with no order, the backend runs one pipeline step per key of prompt (per item of a list)
+    "order": {1: ["default"]},
     "addTo": {},
     "includeScaffoldingInPrompt": True,
     "includeConcessionInPrompt": False,
@@ -508,7 +507,7 @@ def _assistant_template(content: dict, ctx: _PromptContext) -> dict:
     prompt_config = {
         "id": CHAT_STAGE_ID,
         "type": "chat",
-        "prompt": {"default": _prompt_items(content.get("prompt"), context, ctx)},
+        "prompt": _prompt_items(content.get("prompt"), context, ctx),  # a list, see _agent_template
         "order": {},
         "addTo": {},
         "shouldRespondPrompt": _prompt_items(
@@ -555,7 +554,9 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
         "includeScaffoldingInPrompt": _get(
             settings, "include_scaffolding_in_prompt", _get(content, "include_scaffolding_in_prompt")
         ),
-        "prompt": prompts,
+        # a single prompt is sent as a plain list, which deployments older than keyed prompts
+        # (TrAuSt b19db9c) require and newer ones still accept
+        "prompt": prompts if prompt_map else prompts["default"],
         "order": order,
         "addTo": {},
         "structuredOutputConfig": _structured_output(
