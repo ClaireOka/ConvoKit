@@ -641,9 +641,37 @@ def _add_agent_to_cohort(
     return body.get("result", body)
 
 
-def _stall_report(export: dict) -> str:
+def _chat_message_count(export: dict) -> int:
+    """How many non-system messages the experiment's chat has."""
+    return sum(
+        m.get("type") != "system"
+        for cohort in export.get("cohortMap", {}).values()
+        for m in cohort.get("chatMap", {}).get(CHAT_STAGE_ID, [])
+    )
+
+
+def _failed_model_calls(client: dl.Client, experiment_id: str) -> list[str]:
+    """One line per model call of the experiment that didn't return OK. The backend doesn't retry
+    a failed opening message, so one failure there leaves the chat silent."""
+    try:
+        logs = client.export_experiment_logs(experiment_id)
+    except Exception as exc:  # the logs are only for diagnosis
+        return [f"    (could not load model logs: {exc})"]
+    lines = []
+    for log in logs or []:
+        response = log.get("response") or {}
+        if response.get("status", "ok") == "ok":
+            continue
+        who = (log.get("userProfile") or {}).get("name") or log.get("publicId")
+        what = log.get("description") or "chat message"
+        error = response.get("errorMessage") or ""
+        lines.append(f"    model call failed: {who} ({what}): {response.get('status')} {error}".rstrip())
+    return lines
+
+
+def _stall_report(export: dict, failed_calls: list[str] = ()) -> str:
     """Describe where an unfinished experiment is stuck: each participant's status and
-    stage, and how far its chat got."""
+    stage, how far its chat got, and which model calls failed."""
     lines = []
     for participant in export.get("participantMap", {}).values():
         profile = participant.get("profile", {})
@@ -652,14 +680,32 @@ def _stall_report(export: dict) -> str:
             f"{profile.get('currentStatus')} in stage {profile.get('currentStageId')}"
         )
     for cohort in export.get("cohortMap", {}).values():
-        messages = cohort.get("chatMap", {}).get(CHAT_STAGE_ID, [])
         chat_data = cohort.get("dataMap", {}).get(CHAT_STAGE_ID, {})
         started = chat_data.get("discussionStartTimestamp") is not None
         lines.append(
-            f"    chat: {sum(m.get('type') != 'system' for m in messages)} message(s), "
+            f"    chat: {_chat_message_count(export)} message(s), "
             f"discussion {'started' if started else 'never started (so its time limit never runs)'}"
         )
+    lines += failed_calls
     return "\n".join(lines)
+
+
+def _wait_for_first_message(client: dl.Client, experiment_id: str, timeout: float = 120) -> bool:
+    """Poll until the experiment's chat has a message, or until `timeout` seconds have passed.
+
+    The backend sends each chat's opening messages once, when its agents enter the chat, and
+    never retries them; if they fail (e.g. because many model calls at once hit the Gemini rate
+    limit) the chat stays silent. Starting conversations one at a time keeps those calls apart.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            if _chat_message_count(client.export_experiment(experiment_id)) > 0:
+                return True
+        except dl.APIError:
+            pass
+        time.sleep(5)
+    return False
 
 
 def _format_duration(seconds: float) -> str:
@@ -707,7 +753,8 @@ def _wait_for_exports(
             exports[experiment_id] = client.export_experiment(experiment_id)
             print(
                 f"WARNING: experiment {experiment_id} did not finish within {timeout:.0f}s; "
-                f"keeping what it has so far:\n{_stall_report(exports[experiment_id])}"
+                f"keeping what it has so far:\n"
+                f"{_stall_report(exports[experiment_id], _failed_model_calls(client, experiment_id))}"
             )
     return [exports[experiment_id] for experiment_id in experiment_ids], unfinished
 
@@ -762,6 +809,13 @@ def create_simulation(
                 _add_agent_to_cohort(backend, experiment_id, cohort_id, agent)
                 print(f"  {agent['persona']['id']} joined")
             runs.append((experiment_id, cohort_id, pairing.get("id")))
+
+            if _wait_for_first_message(client, experiment_id):
+                print("  conversation started")
+            else:
+                print("  WARNING: no chat message yet; it may never start:")
+                for line in _failed_model_calls(client, experiment_id):
+                    print(line)
 
     print(f"{len(runs)} conversation(s) running, waiting for them to finish...")
     exports, unfinished = _wait_for_exports(client, [run[0] for run in runs], wait_timeout)
