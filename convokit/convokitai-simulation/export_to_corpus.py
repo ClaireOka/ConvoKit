@@ -3,7 +3,8 @@ Client.export_experiment) into a convokitai Corpus.
 
 Each cohort becomes a Conversation. Participant and mediator chat messages become
 Utterances (system messages are skipped), and each participant's private assistant
-messages become Supports of that conversation's Assistants.
+messages become Supports of that conversation's Assistants, and are also attached to the
+utterance they reply to (the last chat message the participant saw).
 
 Usage:
     import json
@@ -94,7 +95,9 @@ def _add_export(
         speakers: dict[str, Speaker] = {}
         alias: dict[str, str] = {}
         prev_id = None
-        utt_ids = set()
+        cohort_utts: dict[str, Utterance] = {}
+        # fallback for matching a support's lastChatMessage when its id is missing
+        utt_id_by_text: dict[str, str] = {}
 
         messages = [
             (stage_id, message)
@@ -134,20 +137,20 @@ def _add_export(
             if message.get("explanation"):
                 ai_meta["explanation"] = message["explanation"]
 
-            utterances.append(
-                Utterance(
-                    id=message["id"],
-                    speaker=speaker,
-                    conversation_id=cohort_id,
-                    reply_to=prev_id,
-                    timestamp=_timestamp_ms(message.get("timestamp")),
-                    text=message.get("message", ""),
-                    meta={"stage_id": stage_id},
-                    ai_meta=ai_meta,
-                )
+            utterance = Utterance(
+                id=message["id"],
+                speaker=speaker,
+                conversation_id=cohort_id,
+                reply_to=prev_id,
+                timestamp=_timestamp_ms(message.get("timestamp")),
+                text=message.get("message", ""),
+                meta={"stage_id": stage_id},
+                ai_meta=ai_meta,
             )
+            utterances.append(utterance)
+            cohort_utts[utterance.id] = utterance
+            utt_id_by_text.setdefault(utterance.text, utterance.id)
             prev_id = message["id"]
-            utt_ids.add(message["id"])
 
         # assistants, and the supports each participant received from theirs
         assistants: dict[str, Assistant] = {}
@@ -184,20 +187,30 @@ def _add_export(
                             conversation_id=cohort_id,
                         ),
                     )
+                    # the support replies to the last chat message the participant saw
                     reply_to = record.get("lastChatMessageId")
+                    if reply_to not in cohort_utts:
+                        reply_to = utt_id_by_text.get(record.get("lastChatMessage"))
                     assistant.supports.append(
                         Support(
                             id=record["id"],
                             text=record.get("message", ""),
-                            reply_to=reply_to if reply_to in utt_ids else None,
+                            reply_to=reply_to,
                             draft=record.get("chatInput", ""),
                             assistant_id=record_assistant_id,
                             timestamp=_timestamp_ms(record.get("timestamp")),
                         )
                     )
 
+        # each utterance also carries the supports replying to it
+        supports_by_reply_to: dict[str, list[Support]] = {}
         for assistant in assistants.values():
             assistant.supports.sort(key=lambda s: s.timestamp or 0)
+            for support in assistant.supports:
+                if support.reply_to is not None:
+                    supports_by_reply_to.setdefault(support.reply_to, []).append(support)
+        for utt_id, supports in supports_by_reply_to.items():
+            cohort_utts[utt_id].supports = sorted(supports, key=lambda s: s.timestamp or 0)
 
         chat_stage = export.get("stageMap", {}).get(config_stage, {}) if config_stage else {}
         descriptions = chat_stage.get("descriptions", {})
@@ -211,14 +224,15 @@ def _add_export(
         convo_ai_meta[cohort_id] = {"alias": alias, "assistants": list(assistants.values())}
 
 
-def export_to_corpus(exports: dict | Iterable[dict], keep_silent_supports: bool = False) -> Corpus:
+def export_to_corpus(exports: dict | Iterable[dict], keep_silent_supports: bool = True) -> Corpus:
     """
     Convert one or more Deliberate Lab experiment exports into a convokitai Corpus, with one
     Conversation per cohort.
 
     :param exports: an experiment export, or a list of them
     :param keep_silent_supports: whether to keep the assistant messages sent when an assistant
-        decided not to intervene (SILENT_SUPPORT_TEXT)
+        decided not to intervene (SILENT_SUPPORT_TEXT). Supports are stored on the conversation's
+        Assistants and on the utterance each one replies to (utterance.supports).
     :return: the Corpus
     """
     if isinstance(exports, dict):

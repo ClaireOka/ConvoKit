@@ -387,6 +387,19 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
         prompts = {"default": _prompt_items(content.get("prompt"), context, ctx)}
         order = {1: ["default"]}
 
+    persona = _persona(content, "participant")
+    persona["id"] = persona_id
+    persona["assistantId"] = assistant_id
+
+    has_instructions = any(
+        item["type"] == "TEXT" and item["text"].strip() for items in prompts.values() for item in items
+    )
+    if not has_instructions:
+        # A prompt with no text (e.g. only CONTEXT) tells the model to do nothing, so the agent
+        # stays silent. With no prompt, the backend uses its default agent participant prompt
+        # (instructions, transcript, and shouldRespond structured output), like the toolkit.
+        return {"persona": persona, "promptMap": {}}
+
     prompt_config = {
         "id": CHAT_STAGE_ID,
         "type": "chat",
@@ -403,9 +416,6 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
         "chatSettings": _chat_settings(settings),
         "numRetries": _get(settings, "num_retries", _get(content, "num_retries")),
     }
-    persona = _persona(content, "participant")
-    persona["id"] = persona_id
-    persona["assistantId"] = assistant_id
     return {"persona": persona, "promptMap": {CHAT_STAGE_ID: prompt_config}}
 
 
