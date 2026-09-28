@@ -28,6 +28,8 @@ import socket
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
@@ -175,8 +177,10 @@ class BackendContainer:
     def _wait_for_ports(self) -> None:
         # All ports must be open before LocalBackend(reuse_running=True) runs,
         # or it will conclude nothing is running and try to spawn emulators.
+        # Docker Desktop (macOS) accepts connections on published ports as soon as the container
+        # starts and resets them until the emulator inside listens, so an open port isn't enough.
         deadline = time.monotonic() + self.startup_timeout
-        while not all(_port_is_open(p) for p in _PORTS):
+        while not all(_port_is_serving(p) for p in _PORTS):
             if self._proc is not None and self._proc.poll() is not None:
                 raise BackendContainerError(
                     f"Container exited with code {self._proc.returncode}.{self._log_hint()}"
@@ -216,3 +220,14 @@ def _port_is_open(port: int, host: str = "127.0.0.1") -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.5)
         return sock.connect_ex((host, port)) == 0
+
+
+def _port_is_serving(port: int, host: str = "127.0.0.1") -> bool:
+    """Whether an HTTP server answers on the port (any status code counts)."""
+    try:
+        urllib.request.urlopen(f"http://{host}:{port}/", timeout=2).close()
+    except urllib.error.HTTPError:
+        return True
+    except (OSError, ValueError):  # refused, reset, timed out, or not HTTP yet
+        return False
+    return True

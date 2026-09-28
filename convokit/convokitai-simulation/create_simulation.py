@@ -690,6 +690,33 @@ def _stall_report(export: dict, failed_calls: list[str] = ()) -> str:
     return "\n".join(lines)
 
 
+def _wait_for_agents_in_chat(
+    client: dl.Client, experiment_id: str, count: int, timeout: float = 15
+) -> bool:
+    """Poll until `count` participants of the experiment have reached the chat stage, or until
+    `timeout` seconds have passed.
+
+    The backend unlocks the chat when the last participant enters it, but only counts the
+    others whose entry has already been saved. If two agents enter at the same moment, each
+    sees the other as not ready and the chat never unlocks, so agents are added one at a time.
+    """
+    poll_client = dl.Client(base_url=client.base_url, api_key=client.api_key, timeout=10)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            participants = poll_client.export_experiment(experiment_id).get("participantMap", {})
+            in_chat = sum(
+                (p.get("profile") or {}).get("currentStageId") == CHAT_STAGE_ID
+                for p in participants.values()
+            )
+            if in_chat >= count:
+                return True
+        except requests.RequestException:
+            pass
+        time.sleep(2)
+    return False
+
+
 def _wait_for_first_message(client: dl.Client, experiment_id: str, timeout: float = 120) -> bool:
     """Poll until the experiment's chat has a message, or until `timeout` seconds have passed.
 
@@ -697,12 +724,15 @@ def _wait_for_first_message(client: dl.Client, experiment_id: str, timeout: floa
     never retries them; if they fail (e.g. because many model calls at once hit the Gemini rate
     limit) the chat stays silent. Starting conversations one at a time keeps those calls apart.
     """
+    # exports get 3x the client timeout; keep each poll short so a slow backend can't stall this
+    poll_client = dl.Client(base_url=client.base_url, api_key=client.api_key, timeout=10)
+    print(f"  waiting up to {timeout:.0f}s for the conversation to start...")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
-            if _chat_message_count(client.export_experiment(experiment_id)) > 0:
+            if _chat_message_count(poll_client.export_experiment(experiment_id)) > 0:
                 return True
-        except dl.APIError:
+        except requests.RequestException:  # includes dl.APIError and timeouts
             pass
         time.sleep(5)
     return False
@@ -805,9 +835,11 @@ def create_simulation(
             topic = "; ".join(block["description"] for block in blocks)
             print(f"created experiment {experiment_id}, cohort {cohort_id} (pairing {pairing.get('id')}: {topic})")
 
-            for agent in agents:
+            for joined, agent in enumerate(agents, start=1):
                 _add_agent_to_cohort(backend, experiment_id, cohort_id, agent)
                 print(f"  {agent['persona']['id']} joined")
+                if joined < len(agents) and not _wait_for_agents_in_chat(client, experiment_id, joined):
+                    print(f"  WARNING: {agent['persona']['id']} hasn't reached the chat yet; adding the next agent anyway")
             runs.append((experiment_id, cohort_id, pairing.get("id")))
 
             if _wait_for_first_message(client, experiment_id):

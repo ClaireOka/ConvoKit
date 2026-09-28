@@ -16,6 +16,7 @@ Usage:
 
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 from convokitai import Assistant, Corpus, Speaker, Support, Utterance
@@ -25,6 +26,16 @@ SILENT_SUPPORT_TEXT = "Nothing further to add at this point in the conversation.
 
 # Deliberate Lab apiType -> convokit.genai provider
 PROVIDERS = {"GEMINI": "gemini", "OPENAI": "gpt", "OLLAMA": "local"}
+
+
+def _strip_speaker_prefix(text: str, name: str) -> str:
+    """Remove a leading "(02:40) 🐻 Bear:" from a message. Agents see the transcript in that
+    format and often copy it into their replies. Only the sender's own name is stripped, and
+    the timestamp and avatar are optional."""
+    if not name:
+        return text
+    prefix = rf"^\s*(?:\(\d{{1,2}}:\d{{2}}(?::\d{{2}})?\)\s*)?(?:\S+\s+)?{re.escape(name)}\s*:\s*"
+    return re.sub(prefix, "", text, count=1)
 
 
 def _timestamp_ms(timestamp) -> int | None:
@@ -143,13 +154,14 @@ def _add_export(
                 conversation_id=cohort_id,
                 reply_to=prev_id,
                 timestamp=_timestamp_ms(message.get("timestamp")),
-                text=message.get("message", ""),
+                text=_strip_speaker_prefix(message.get("message", ""), alias[sender_id]),
                 meta={"stage_id": stage_id},
                 ai_meta=ai_meta,
             )
             utterances.append(utterance)
             cohort_utts[utterance.id] = utterance
-            utt_id_by_text.setdefault(utterance.text, utterance.id)
+            # supports record the raw message text they reply to
+            utt_id_by_text.setdefault(message.get("message", ""), utterance.id)
             prev_id = message["id"]
 
         # assistants, and the supports each participant received from theirs
