@@ -116,31 +116,6 @@ class Client:
         return self._handle_response(response)
 
     # =========================================================================
-    # Experimenter Methods
-    # =========================================================================
-
-    def set_gemini_api_key(self, api_key: str) -> dict:
-        """
-        Set the Gemini API key used by agents in your experiments.
-
-        Stored on the experimenter who owns this Deliberate Lab API key, the
-        same setting as the web UI's experimenter settings. Requires write
-        permission. The key is never returned by the API.
-
-        Args:
-            api_key: Gemini API key
-
-        Returns:
-            {"success": True}
-        """
-        response = self._session.put(
-            f"{self.base_url}/experimenter/api-keys/gemini",
-            json={"apiKey": api_key},
-            timeout=self.timeout,
-        )
-        return self._handle_response(response)
-
-    # =========================================================================
     # Experiment Methods
     # =========================================================================
 

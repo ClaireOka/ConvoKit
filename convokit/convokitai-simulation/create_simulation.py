@@ -31,9 +31,6 @@ Requirements:
     - A deliberate-lab checkout built per local_backend.py's docstring (local backend only).
     - A real LLM key (e.g. GEMINI_API_KEY) — otherwise the agents will be created but
       every response call will fail.
-
-Usage:
-    GEMINI_API_KEY=... python create_simulation.py /path/to/deliberate-lab simulation.yaml
 """
 
 from __future__ import annotations
