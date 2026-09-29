@@ -3,28 +3,28 @@ from typing import Dict, List, Optional
 
 from convokit.model import Conversation as BaseConversation
 from .aiUtil import AI_META_KEYS, LEGACY_AI_KEYS, as_dict, split_ai_fields, transcript_sort_key
-from .assistant import Assistant
+from .private_assistant import PrivateAssistant
 from .support import Support
 
 
 class Conversation(BaseConversation):
     """
     Represents a discrete subset of utterances in the dataset, connected by a reply-to chain,
-    optionally accompanied by AI assistants and their support messages.
+    optionally accompanied by AI private assistants and their support messages.
 
     Takes the same arguments as convokit.Conversation, plus:
 
     :param ai_meta: metadata for ConvoKitAI. Recognized keys:
 
         - "alias": names speakers are referred to in the conversation, keyed by speaker id
-        - "assistants": list of Assistants in this conversation
-        - "supports": list of Supports created from all assistants in this conversation
+        - "private_assistants": list of PrivateAssistants in this conversation
+        - "supports": list of Supports created from all private assistants in this conversation
 
     :ivar ai_meta: metadata for ConvoKitAI. Assigning a dict merges it into the existing ai_meta.
     :ivar alias: the speaker id -> alias mapping
-    :ivar assistants: the Assistants in this conversation
+    :ivar private_assistants: the PrivateAssistants in this conversation
     :ivar supports: the Supports in this conversation. If ai_meta has no "supports" entry, these are
-        collected from the conversation's assistants.
+        collected from the conversation's private assistants.
     """
 
     def __init__(
@@ -63,8 +63,14 @@ class Conversation(BaseConversation):
     def ai_meta(self, value):
         if isinstance(value, dict):
             merged = {**as_dict(getattr(self, "_ai_meta", {})), **value}
+            # "assistants" is from earlier iterations of the format
             if "assistants" in merged:
-                merged["assistants"] = Assistant.normalize_list(merged["assistants"])
+                legacy = merged.pop("assistants")
+                merged.setdefault("private_assistants", legacy)
+            if "private_assistants" in merged:
+                merged["private_assistants"] = PrivateAssistant.normalize_list(
+                    merged["private_assistants"]
+                )
             if "supports" in merged:
                 merged["supports"] = Support.normalize_list(merged["supports"])
             self._ai_meta = merged
@@ -80,18 +86,18 @@ class Conversation(BaseConversation):
         self.ai_meta = {"alias": dict(value or {})}
 
     @property
-    def assistants(self) -> List[Assistant]:
-        return list(self.ai_meta.get("assistants", []))
+    def private_assistants(self) -> List[PrivateAssistant]:
+        return list(self.ai_meta.get("private_assistants", []))
 
-    @assistants.setter
-    def assistants(self, value):
-        self.ai_meta = {"assistants": value}
+    @private_assistants.setter
+    def private_assistants(self, value):
+        self.ai_meta = {"private_assistants": value}
 
-    def get_assistant(self, assistant_id: str) -> Assistant:
+    def get_private_assistant(self, assistant_id: str) -> PrivateAssistant:
         """
-        Get the Assistant with the specified id. Raises a KeyError if there is no such assistant.
+        Get the PrivateAssistant with the specified id. Raises a KeyError if there is no such private assistant.
         """
-        for assistant in self.assistants:
+        for assistant in self.private_assistants:
             if assistant.id == assistant_id:
                 return assistant
         raise KeyError(assistant_id)
@@ -110,7 +116,7 @@ class Conversation(BaseConversation):
     def supports(self) -> List[Support]:
         if "supports" in self.ai_meta:
             return list(self.ai_meta["supports"])
-        return [support for assistant in self.assistants for support in assistant.supports]
+        return [support for assistant in self.private_assistants for support in assistant.supports]
 
     @supports.setter
     def supports(self, value):
@@ -172,15 +178,15 @@ class Conversation(BaseConversation):
             entries = entries[: end + 1]
 
         alias_map = self.alias
-        assistants_by_id = {assistant.id: assistant for assistant in self.assistants}
+        assistants_by_id = {assistant.id: assistant for assistant in self.private_assistants}
         lines = []
         for entry in entries:
             if isinstance(entry, Support):
-                assistant = assistants_by_id.get(entry.assistant_id)
-                label = entry.assistant_id or "assistant"
+                assistant = assistants_by_id.get(entry.private_assistant_id)
+                label = entry.private_assistant_id or "private assistant"
                 viewers = [alias_map.get(s, s) for s in (assistant.speakers if assistant else [])]
                 lines.append(
-                    f"    Assistant[{label}]"
+                    f"    PrivateAssistant[{label}]"
                     + (f" -> {', '.join(viewers)}" if viewers else "")
                     + ":"
                 )

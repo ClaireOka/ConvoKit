@@ -14,7 +14,7 @@ class Speaker(BaseSpeaker):
     :param ai_meta: metadata for ConvoKitAI (empty if is_ai is False). Recognized keys:
 
         - "config": dict configuration that generates messages for this speaker
-        - "role": the speaker's role in the conversation, e.g. "participant", "mediator"
+        - "role": the speaker's role in the conversation, e.g. "participant", "public assistant"
 
     If `meta` contains "is_ai" / "ai_meta" entries (as in a dumped corpus) and the
     corresponding arguments are not given, they are moved out of `meta` into the attributes.

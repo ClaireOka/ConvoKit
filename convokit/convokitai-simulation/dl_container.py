@@ -26,6 +26,8 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
+import tarfile
 import tempfile
 import time
 import urllib.error
@@ -47,6 +49,14 @@ FIRESTORE_PORT = 8085
 # functions to serve. Node is far slower under udocker (Colab), so without a
 # longer limit the functions emulator comes up with no functions at all.
 DEFAULT_ENV = {"FUNCTIONS_DISCOVERY_TIMEOUT": "300"}  # seconds
+
+# udocker release downloaded when udocker isn't installed (e.g. pip can't install it)
+UDOCKER_VERSION = "1.3.17"
+_UDOCKER_URL = (
+    "https://github.com/indigo-dc/udocker/releases/download/"
+    f"{UDOCKER_VERSION}/udocker-{UDOCKER_VERSION}.tar.gz"
+)
+_UDOCKER_DIR = Path.home() / ".cache" / "dl-sim" / f"udocker-{UDOCKER_VERSION}"
 
 _PORTS = (5001, FIRESTORE_PORT, 9099)  # functions, firestore, auth (firebase.docker.json)
 _NAME = "dl-backend"
@@ -147,13 +157,9 @@ class BackendContainer:
         _run(["docker", "run", "-d", "--rm", "--name", _NAME, *ports, *env, self.image])
 
     def _start_udocker(self) -> None:
-        udocker = shutil.which("udocker")
-        if udocker is None:
-            raise BackendContainerError(
-                "No Docker daemon and udocker is not installed: pip install udocker"
-            )
+        udocker = _udocker_command() or _download_udocker()
         # Colab runs everything as root, which udocker refuses by default.
-        base = [udocker] + (["--allow-root"] if os.geteuid() == 0 else [])
+        base = udocker + (["--allow-root"] if os.geteuid() == 0 else [])
         _run(base + ["install"])  # one-time download of udocker's engines
         if self.pull:
             _run(base + ["pull", self.image])
@@ -206,6 +212,50 @@ def _docker_available() -> bool:
     if shutil.which("docker") is None:
         return False
     return subprocess.run(["docker", "info"], capture_output=True).returncode == 0
+
+
+def _udocker_command() -> Optional[list[str]]:
+    """The command that runs udocker, or None if it is not installed.
+
+    `pip install udocker` only provides a `udocker` script, which isn't on PATH
+    when pip's script directory isn't (e.g. a notebook kernel whose Python
+    differs from the shell's), so also look next to this Python, and fall back
+    to running udocker's entry point with this Python.
+    """
+    script = shutil.which("udocker") or shutil.which(
+        "udocker", path=str(Path(sys.executable).parent)
+    )
+    if script is not None:
+        return [script]
+    try:
+        import udocker.maincmd  # noqa: F401
+    except ImportError:
+        return None
+    return [sys.executable, "-c", "import sys; from udocker.maincmd import main; sys.exit(main())"]
+
+
+def _download_udocker() -> list[str]:
+    """Download the udocker release (once) and return the command that runs it.
+
+    This is udocker's documented install without pip: the release tarball
+    contains the udocker package with a launcher script, run with this Python.
+    """
+    launcher = _UDOCKER_DIR / f"udocker-{UDOCKER_VERSION}" / "udocker" / "maincmd.py"
+    if not launcher.exists():
+        _UDOCKER_DIR.mkdir(parents=True, exist_ok=True)
+        archive = _UDOCKER_DIR / "udocker.tar.gz"
+        try:
+            urllib.request.urlretrieve(_UDOCKER_URL, archive)
+            with tarfile.open(archive) as tar:
+                tar.extractall(_UDOCKER_DIR, filter="data")
+        except (OSError, tarfile.TarError) as e:
+            raise BackendContainerError(
+                f"No Docker daemon and udocker is not installed, and downloading udocker from "
+                f"{_UDOCKER_URL} failed: {e}\nInstall it with `%pip install udocker` and try again."
+            ) from e
+        finally:
+            archive.unlink(missing_ok=True)
+    return [sys.executable, str(launcher)]
 
 
 def _run(cmd: list[str]) -> None:

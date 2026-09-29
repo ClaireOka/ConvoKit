@@ -11,7 +11,7 @@ import os
 from typing import Dict, List, Optional
 
 from .aiUtil import AI_META_KEYS, LEGACY_AI_KEYS, LEGACY_CORPUS_KEYS, as_dict, normalize_for_dump
-from .assistant import Assistant
+from .private_assistant import PrivateAssistant
 from .conversation import Conversation
 from .speaker import Speaker
 from .support import Support
@@ -102,10 +102,10 @@ def migrate_legacy_assistants_and_supports(corpus, assistants, supports: List[Di
     """
     Move corpus-level assistants and supports (from earlier iterations of the format) onto the
     Conversations they belong to: each assistant is added to the Conversation matching its
-    conversation_id, and each support to the Assistant matching its assistant_id. Supports with
+    conversation_id, and each support to the PrivateAssistant matching its private_assistant_id. Supports with
     no matching assistant are added directly to the Conversation matching their conversation_id.
     """
-    assistants = Assistant.normalize_list(assistants)
+    assistants = PrivateAssistant.normalize_list(assistants)
     if not assistants and not supports:
         return
 
@@ -115,7 +115,7 @@ def migrate_legacy_assistants_and_supports(corpus, assistants, supports: List[Di
         if not support:
             continue
         support = support[0]
-        assistant = assistants_by_id.get(support.assistant_id)
+        assistant = assistants_by_id.get(support.private_assistant_id)
         if assistant is not None:
             if support.id not in {s.id for s in assistant.supports}:
                 assistant.supports.append(support)
@@ -131,8 +131,8 @@ def migrate_legacy_assistants_and_supports(corpus, assistants, supports: List[Di
             assistant.conversation_id
         ):
             convo = corpus.get_conversation(assistant.conversation_id)
-            if assistant.id not in {a.id for a in convo.assistants}:
-                convo.assistants = convo.assistants + [assistant]
+            if assistant.id not in {a.id for a in convo.private_assistants}:
+                convo.private_assistants = convo.private_assistants + [assistant]
 
 
 def stash_ai_fields_in_meta(corpus) -> None:

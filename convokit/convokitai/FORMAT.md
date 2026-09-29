@@ -1,11 +1,11 @@
-## Assistant
+## PrivateAssistant
 
 | Field      | Type      | Description                                  |
 |------------|-----------|----------------------------------------------|
-| `id`       | `string`  | Unique ID for the assistant.                 |
-| `config` | `dict` | Configuration for this assistant, including the `prompt` that generates a support message from it (required by `Assistant.generate`). See the example below |
+| `id`       | `string`  | Unique ID for the private assistant.                 |
+| `config` | `dict` | Configuration for this private assistant, including the `prompt` that generates a support message from it (required by `PrivateAssistant.generate`). See the example below |
 | `Support[]` | `list` | List of support objects |
-| `speakers` | `list` | List of speakers that can see this Assistant's supports |
+| `speakers` | `list` | List of speakers that can see this PrivateAssistant's supports |
 | `conversation_id` | `string` | id of conversation |
 
 config example
@@ -25,7 +25,7 @@ config example
 | `text` | `string` | Output of the support |
 | `reply_to` | utt_id | The utterance the assisted speaker is replying  |
 | `draft` | `string` | The draft of the post that the assisted speaker has written so far. empty string means draft is empty  |
-| `assistant_id` | `string` | id of assistant |
+| `private_assistant_id` | `string` | id of assistant |
 | `timestamp` | `string` | The timestamp the message was sent  |
 
 ## Speaker
@@ -40,7 +40,7 @@ config example
 | Field    | Type     | Description                                                         |
 | -------- | -------- | ------------------------------------------------------------------- |
 | `config` | `dict`   | Config that generates a message for this speaker (used by `Speaker.generate`): `prompt` (required), `model`, optional `provider` (`gemini` / `gpt` / `local`, inferred from `model`) and `temperature`. |
-| `role`   | `string` | Speaker's role in the conversation, e.g. `participant`, `mediator`. |
+| `role`   | `string` | Speaker's role in the conversation, e.g. `participant`, `public assistant`. |
 
 
 ## Conversation
@@ -53,7 +53,7 @@ config example
 | Field        | Type   | Description                                                                                          |
 | ------------ | ------ | ---------------------------------------------------------------------------------------------------- |
 | `alias`      | `dict` | Names speakers are referred to in the conversation, e.g. `bear`, `goose`, etc., keyed by speaker ID. |
-| `assistants` | `list` | List of assistants                             |
+| `private_assistants` | `list` | List of assistants                             |
 | `Support[]` | `list` | List of supports created from all assistants in this conversation                         |
 
 ## Utterance
