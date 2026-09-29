@@ -6,7 +6,7 @@ ConvoKit AI corpus remains a valid ConvoKit corpus:
 
 - speaker meta:      "is_ai", "ai_meta" ({"config", "role"})
 - utterance meta:    "ai_meta" ({"config", "supports"})
-- conversation meta: "ai_meta" ({"alias", "assistants", "supports"})
+- conversation meta: "ai_meta" ({"alias", "private_assistants", "supports"})
 - corpus meta:       "has_ai", "ai_meta"
 
 In memory, these fields are pulled out of .meta and exposed as attributes.
@@ -65,7 +65,7 @@ def as_dict(value) -> Dict:
 
 def normalize_for_dump(value):
     """
-    Recursively convert Support / Assistant objects into JSON-serializable dicts.
+    Recursively convert Support / PrivateAssistant objects into JSON-serializable dicts.
     """
     if hasattr(value, "to_dict") and not isinstance(value, dict):
         return value.to_dict()

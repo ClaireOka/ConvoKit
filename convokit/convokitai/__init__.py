@@ -1,5 +1,5 @@
 """
-ConvoKit AI: ConvoKit's data model extended with AI speakers, assistants, and support messages.
+ConvoKit AI: ConvoKit's data model extended with AI speakers, private assistants, and support messages.
 
 Mirrors the convokit.model API, so it can be used as a drop-in replacement::
 
@@ -9,7 +9,7 @@ Mirrors the convokit.model API, so it can be used as a drop-in replacement::
 
 from convokit.model import ConvoKitIndex, ConvoKitMatrix, ConvoKitMeta, CorpusComponent, UtteranceNode
 from convokit.util import download
-from .assistant import Assistant
+from .private_assistant import PrivateAssistant
 from .conversation import Conversation
 from .corpus import Corpus
 from .speaker import Speaker
@@ -17,13 +17,13 @@ from .support import Support
 from .utterance import Utterance
 
 __all__ = [
-    "Assistant",
     "Conversation",
     "ConvoKitIndex",
     "ConvoKitMatrix",
     "ConvoKitMeta",
     "Corpus",
     "CorpusComponent",
+    "PrivateAssistant",
     "Speaker",
     "Support",
     "Utterance",

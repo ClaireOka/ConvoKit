@@ -4,7 +4,7 @@ from pandas import DataFrame
 
 from convokit.model import Corpus as BaseCorpus
 from .aiUtil import as_dict, split_ai_fields
-from .assistant import Assistant
+from .private_assistant import PrivateAssistant
 from .conversation import Conversation
 from .corpus_helpers import (
     extract_corpus_ai_fields,
@@ -19,7 +19,7 @@ from .utterance import Utterance
 
 class Corpus(BaseCorpus):
     """
-    Represents a dataset of conversations that may involve AI speakers and AI assistants.
+    Represents a dataset of conversations that may involve AI speakers and AI private assistants.
     Can be loaded from a folder or constructed from a list of utterances, like convokit.Corpus,
     and all of its Speakers, Utterances, and Conversations are convokitai objects.
 
@@ -32,7 +32,8 @@ class Corpus(BaseCorpus):
     :ivar has_ai: True if there are AI speakers in the corpus
     :ivar ai_meta: metadata for ConvoKitAI. Assigning a dict merges it into the existing ai_meta.
 
-    Assistants and Supports belong to Conversations (see Conversation.ai_meta); iter_assistants() and
+    PrivateAssistants and Supports belong to Conversations (see Conversation.ai_meta);
+    iter_private_assistants() and
     iter_supports() iterate over them across the whole corpus.
     """
 
@@ -121,23 +122,23 @@ class Corpus(BaseCorpus):
         else:
             self._ai_meta = {}
 
-    def iter_assistants(
-        self, selector: Callable[[Assistant], bool] = lambda assistant: True
-    ) -> Generator[Assistant, None, None]:
+    def iter_private_assistants(
+        self, selector: Callable[[PrivateAssistant], bool] = lambda assistant: True
+    ) -> Generator[PrivateAssistant, None, None]:
         """
-        Get the Assistants of all Conversations in the Corpus, with an optional selector that filters
-        for Assistants that should be included.
+        Get the PrivateAssistants of all Conversations in the Corpus, with an optional selector that
+        filters for PrivateAssistants that should be included.
         """
         for convo in self.iter_conversations():
-            for assistant in convo.assistants:
+            for assistant in convo.private_assistants:
                 if selector(assistant):
                     yield assistant
 
-    def get_assistant(self, assistant_id: str) -> Assistant:
+    def get_private_assistant(self, assistant_id: str) -> PrivateAssistant:
         """
-        Get the Assistant with the specified id. Raises a KeyError if there is no such assistant.
+        Get the PrivateAssistant with the specified id. Raises a KeyError if there is no such private assistant.
         """
-        for assistant in self.iter_assistants(lambda a: a.id == assistant_id):
+        for assistant in self.iter_private_assistants(lambda a: a.id == assistant_id):
             return assistant
         raise KeyError(assistant_id)
 
@@ -259,11 +260,11 @@ class Corpus(BaseCorpus):
     def print_summary_stats(self) -> None:
         """
         Helper function for printing the number of Speakers (and AI Speakers), Utterances, Conversations,
-        Assistants, and Supports in this Corpus
+        PrivateAssistants, and Supports in this Corpus
 
         :return: None
         """
         super().print_summary_stats()
         print("Number of AI Speakers: {}".format(sum(s.is_ai for s in self.iter_speakers())))
-        print("Number of Assistants: {}".format(sum(1 for _ in self.iter_assistants())))
+        print("Number of PrivateAssistants: {}".format(sum(1 for _ in self.iter_private_assistants())))
         print("Number of Supports: {}".format(sum(1 for _ in self.iter_supports())))

@@ -3,9 +3,9 @@ from typing import Dict, Iterable, List, Optional
 from .support import Support
 
 
-class Assistant:
+class PrivateAssistant:
     """
-    Represents an AI assistant that sends Supports to one or more speakers in a Conversation.
+    Represents an AI private assistant that sends Supports to one or more speakers in a Conversation.
 
     :param id: the unique id of the assistant
     :param config: configuration of the assistant, e.g.
@@ -40,7 +40,7 @@ class Assistant:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> Optional["Assistant"]:
+    def from_dict(cls, data: Dict) -> Optional["PrivateAssistant"]:
         if not isinstance(data, dict):
             return None
         return cls(
@@ -52,19 +52,19 @@ class Assistant:
         )
 
     @staticmethod
-    def normalize_list(value) -> List["Assistant"]:
+    def normalize_list(value) -> List["PrivateAssistant"]:
         """
-        Convert a list (or dict of id -> value) of Assistants and/or dicts into a list of Assistants.
+        Convert a list (or dict of id -> value) of PrivateAssistants and/or dicts into a list of PrivateAssistants.
         Unparseable entries are dropped.
         """
         if isinstance(value, dict):
             value = value.values()
         normalized = []
         for item in value or []:
-            if isinstance(item, Assistant):
+            if isinstance(item, PrivateAssistant):
                 normalized.append(item)
             elif isinstance(item, dict):
-                normalized.append(Assistant.from_dict(item))
+                normalized.append(PrivateAssistant.from_dict(item))
         return normalized
 
     def generate(
@@ -98,7 +98,7 @@ class Assistant:
 
         config = self.config
         if not config.get("prompt"):
-            raise ValueError("Assistant {!r} has no prompt in config".format(self.id))
+            raise ValueError("PrivateAssistant {!r} has no prompt in config".format(self.id))
         if append and conversation is None:
             raise ValueError("A conversation is required to append the generated support")
 
@@ -132,16 +132,16 @@ class Assistant:
             text=text,
             reply_to=reply_to,
             draft=draft,
-            assistant_id=self.id,
+            private_assistant_id=self.id,
             timestamp=timestamp if timestamp is not None else generation.next_timestamp(conversation),
         )
         if append:
             self.supports.append(support)
             if self.conversation_id is None:
                 self.conversation_id = conversation.id
-            stored = next((a for a in conversation.assistants if a.id == self.id), None)
+            stored = next((a for a in conversation.private_assistants if a.id == self.id), None)
             if stored is None:
-                conversation.assistants = conversation.assistants + [self]
+                conversation.private_assistants = conversation.private_assistants + [self]
             elif stored is not self:
                 stored.supports.append(support)
             if "supports" in conversation.ai_meta:
@@ -149,4 +149,4 @@ class Assistant:
         return support
 
     def __repr__(self):
-        return "Assistant({})".format(self.to_dict())
+        return "PrivateAssistant({})".format(self.to_dict())

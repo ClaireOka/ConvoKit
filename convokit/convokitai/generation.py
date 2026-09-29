@@ -1,5 +1,5 @@
 """
-Helpers for generating Utterances (for AI Speakers) and Supports (for Assistants) with convokit.genai.
+Helpers for generating Utterances (for AI Speakers) and Supports (for PrivateAssistants) with convokit.genai.
 
 A generation config is a dict with the keys:
 

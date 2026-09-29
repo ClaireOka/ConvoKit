@@ -2,9 +2,9 @@
 Client.export_experiment) into a convokitai Corpus.
 
 Each cohort becomes a Conversation. Participant and mediator chat messages become
-Utterances (system messages are skipped), and each participant's private assistant
-messages become Supports of that conversation's Assistants, and are also attached to the
-utterance they reply to (the last chat message the participant saw).
+Utterances (system messages are skipped), with mediators as speakers with role "public assistant",
+and each participant's private assistant messages become Supports of that conversation's
+PrivateAssistants, and are also attached to the utterance they reply to (the last chat message the participant saw).
 
 Usage:
     import json
@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from typing import Iterable
 
-from convokitai import Assistant, Corpus, Speaker, Support, Utterance
+from convokitai import Corpus, PrivateAssistant, Speaker, Support, Utterance
 
 # what an assistant "says" when it decides not to intervene
 SILENT_SUPPORT_TEXT = "Nothing further to add at this point in the conversation."
@@ -124,7 +124,7 @@ def _add_export(
                 if message["type"] == "mediator":
                     config = _generation_config(mediator_map.get(message.get("agentId")), config_stage)
                     speakers[sender_id] = Speaker(
-                        id=sender_id, is_ai=True, ai_meta={"role": "mediator", "config": config}
+                        id=sender_id, is_ai=True, ai_meta={"role": "public assistant", "config": config}
                     )
                 else:
                     profile = participant_map.get(sender_id, {}).get("profile", {})
@@ -164,8 +164,8 @@ def _add_export(
             utt_id_by_text.setdefault(message.get("message", ""), utterance.id)
             prev_id = message["id"]
 
-        # assistants, and the supports each participant received from theirs
-        assistants: dict[str, Assistant] = {}
+        # private assistants, and the supports each participant received from theirs
+        assistants: dict[str, PrivateAssistant] = {}
         for participant in participant_map.values():
             profile = participant.get("profile", {})
             if profile.get("currentCohortId") != cohort_id:
@@ -174,7 +174,7 @@ def _add_export(
             if assistant_id:
                 assistant = assistants.setdefault(
                     assistant_id,
-                    Assistant(
+                    PrivateAssistant(
                         id=assistant_id,
                         config=_generation_config(assistant_map.get(assistant_id), config_stage),
                         conversation_id=cohort_id,
@@ -192,7 +192,7 @@ def _add_export(
                     record_assistant_id = record.get("agentId") or assistant_id
                     assistant = assistants.setdefault(
                         record_assistant_id,
-                        Assistant(
+                        PrivateAssistant(
                             id=record_assistant_id,
                             config=_generation_config(assistant_map.get(record_assistant_id), config_stage),
                             speakers=[profile["publicId"]],
@@ -209,7 +209,7 @@ def _add_export(
                             text=record.get("message", ""),
                             reply_to=reply_to,
                             draft=record.get("chatInput", ""),
-                            assistant_id=record_assistant_id,
+                            private_assistant_id=record_assistant_id,
                             timestamp=_timestamp_ms(record.get("timestamp")),
                         )
                     )
@@ -233,7 +233,7 @@ def _add_export(
             "description": descriptions.get("primaryText", ""),
             "blocks": descriptions.get("blocks", []),
         }
-        convo_ai_meta[cohort_id] = {"alias": alias, "assistants": list(assistants.values())}
+        convo_ai_meta[cohort_id] = {"alias": alias, "private_assistants": list(assistants.values())}
 
 
 def export_to_corpus(exports: dict | Iterable[dict], keep_silent_supports: bool = True) -> Corpus:
@@ -244,7 +244,7 @@ def export_to_corpus(exports: dict | Iterable[dict], keep_silent_supports: bool 
     :param exports: an experiment export, or a list of them
     :param keep_silent_supports: whether to keep the assistant messages sent when an assistant
         decided not to intervene (SILENT_SUPPORT_TEXT). Supports are stored on the conversation's
-        Assistants and on the utterance each one replies to (utterance.supports).
+        PrivateAssistants and on the utterance each one replies to (utterance.supports).
     :return: the Corpus
     """
     if isinstance(exports, dict):
