@@ -1,11 +1,16 @@
-"""
-dl_container.py — run the published Deliberate Lab backend image so that
-`LocalBackend(..., reuse_running=True)` can attach to it.
+"""Run the published Deliberate Lab backend container image.
 
-Uses Docker when a daemon is available (your laptop) and falls back to
-udocker, which runs images without a daemon or root privileges, where it is
-not (Google Colab). udocker shares the host network, so the emulators are
-reachable on localhost exactly as with `docker run -p`.
+The image runs the Firebase emulators for a Deliberate Lab backend
+(https://github.com/PAIR-code/deliberate-lab), so that
+``LocalBackend(..., reuse_running=True)`` from :mod:`local_backend` can attach
+to it without a local Deliberate Lab checkout.
+
+Docker is used when a Docker daemon is available (e.g. on a laptop).
+Otherwise the container runs under udocker, which needs neither a daemon nor
+root privileges (e.g. on Google Colab). udocker shares the host network, so
+the emulators are reachable on localhost exactly as with ``docker run -p``.
+
+Example::
 
     from dl_container import BackendContainer
     from local_backend import LocalBackend
@@ -15,8 +20,8 @@ reachable on localhost exactly as with `docker run -p`.
             client = backend.client()
             print(client.health_check())
 
-In a notebook, `container = BackendContainer().start()` in one cell and
-`container.stop()` in a later one works too.
+In a notebook, you can also call ``container = BackendContainer().start()`` in
+one cell and ``container.stop()`` in a later one.
 """
 
 from __future__ import annotations
@@ -50,7 +55,7 @@ FIRESTORE_PORT = 8085
 # longer limit the functions emulator comes up with no functions at all.
 DEFAULT_ENV = {"FUNCTIONS_DISCOVERY_TIMEOUT": "300"}  # seconds
 
-# udocker release downloaded when udocker isn't installed (e.g. pip can't install it)
+# udocker release to download when udocker isn't installed (e.g. pip can't install it)
 UDOCKER_VERSION = "1.3.17"
 _UDOCKER_URL = (
     "https://github.com/indigo-dc/udocker/releases/download/"
@@ -67,6 +72,24 @@ class BackendContainerError(RuntimeError):
 
 
 class BackendContainer:
+    """Runs the Deliberate Lab backend image and waits until its emulators serve requests.
+
+    Use it as a context manager, or call :meth:`start` and :meth:`stop` yourself. Only one
+    backend can run per machine, since the emulator ports are fixed.
+
+    :param image: image reference to run. Defaults to ``DEFAULT_IMAGE``.
+    :param runtime: ``"docker"`` or ``"udocker"``. Defaults to ``"docker"`` when a Docker
+        daemon is reachable, otherwise ``"udocker"``.
+    :param pull: whether to pull the image before running it. Set to False to use an image
+        that is already present locally.
+    :param startup_timeout: seconds to wait for the emulators to come up. The first udocker
+        run also extracts the image, which is slow.
+    :param log_path: file to write the container's output to (udocker only; with Docker, use
+        ``docker logs dl-backend``). Defaults to ``dl-backend.log`` in the temp directory.
+    :param env: environment variables for the container, added to ``DEFAULT_ENV``.
+    :raises BackendContainerError: if ``runtime`` is not ``"docker"`` or ``"udocker"``.
+    """
+
     def __init__(
         self,
         image: str = DEFAULT_IMAGE,
@@ -77,19 +100,6 @@ class BackendContainer:
         log_path: str | os.PathLike[str] | None = None,
         env: Optional[dict[str, str]] = None,
     ) -> None:
-        """
-        Args:
-            image: Image reference to run.
-            runtime: "docker" or "udocker". Defaults to docker when its daemon
-                is reachable, otherwise udocker.
-            pull: Pull the image before running. Set False to use an image
-                that is already present locally.
-            startup_timeout: Seconds to wait for the emulator ports. The first
-                udocker run also extracts the image, which is slow.
-            log_path: Where to write container output (udocker only; with
-                Docker use `docker logs dl-backend`).
-            env: Environment variables for the container, added to DEFAULT_ENV.
-        """
         self.image = image
         self.runtime = runtime or ("docker" if _docker_available() else "udocker")
         if self.runtime not in ("docker", "udocker"):
@@ -106,6 +116,13 @@ class BackendContainer:
     # -- public surface ---------------------------------------------------
 
     def start(self) -> "BackendContainer":
+        """Start the container and wait until all emulators serve requests.
+
+        :return: this BackendContainer
+        :raises BackendContainerError: if an emulator port is already in use, the container
+            fails to start or exits, or the emulators don't come up within
+            ``startup_timeout`` seconds. The container is stopped before raising.
+        """
         busy = [p for p in _PORTS if _port_is_open(p)]
         if busy:
             raise BackendContainerError(
@@ -124,6 +141,7 @@ class BackendContainer:
         return self
 
     def stop(self) -> None:
+        """Stop the container. Does nothing if it is not running."""
         if not self._started:
             return
         self._started = False
@@ -184,7 +202,7 @@ class BackendContainer:
         # All ports must be open before LocalBackend(reuse_running=True) runs,
         # or it will conclude nothing is running and try to spawn emulators.
         # Docker Desktop (macOS) accepts connections on published ports as soon as the container
-        # starts and resets them until the emulator inside listens, so an open port isn't enough.
+        # starts, and resets them until the emulator inside listens, so an open port isn't enough.
         deadline = time.monotonic() + self.startup_timeout
         while not all(_port_is_serving(p) for p in _PORTS):
             if self._proc is not None and self._proc.poll() is not None:
@@ -215,12 +233,12 @@ def _docker_available() -> bool:
 
 
 def _udocker_command() -> Optional[list[str]]:
-    """The command that runs udocker, or None if it is not installed.
+    """Return the command that runs udocker, or None if it is not installed.
 
-    `pip install udocker` only provides a `udocker` script, which isn't on PATH
-    when pip's script directory isn't (e.g. a notebook kernel whose Python
-    differs from the shell's), so also look next to this Python, and fall back
-    to running udocker's entry point with this Python.
+    ``pip install udocker`` only provides a ``udocker`` script, which is not on
+    PATH when pip's script directory isn't (e.g. a notebook kernel whose Python
+    differs from the shell's). So also look next to this Python executable, and
+    fall back to running udocker's entry point with this Python.
     """
     script = shutil.which("udocker") or shutil.which(
         "udocker", path=str(Path(sys.executable).parent)
@@ -237,8 +255,8 @@ def _udocker_command() -> Optional[list[str]]:
 def _download_udocker() -> list[str]:
     """Download the udocker release (once) and return the command that runs it.
 
-    This is udocker's documented install without pip: the release tarball
-    contains the udocker package with a launcher script, run with this Python.
+    This is udocker's documented installation without pip: the release tarball
+    contains the udocker package and a launcher script, run with this Python.
     """
     launcher = _UDOCKER_DIR / f"udocker-{UDOCKER_VERSION}" / "udocker" / "maincmd.py"
     if not launcher.exists():
@@ -273,7 +291,7 @@ def _port_is_open(port: int, host: str = "127.0.0.1") -> bool:
 
 
 def _port_is_serving(port: int, host: str = "127.0.0.1") -> bool:
-    """Whether an HTTP server answers on the port (any status code counts)."""
+    """Return whether an HTTP server answers on the port (any status code counts)."""
     try:
         urllib.request.urlopen(f"http://{host}:{port}/", timeout=2).close()
     except urllib.error.HTTPError:

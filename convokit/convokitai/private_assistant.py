@@ -1,3 +1,7 @@
+"""
+The PrivateAssistant class: an AI assistant that privately supports speakers in a Conversation.
+"""
+
 from typing import Dict, Iterable, List, Optional
 
 from .support import Support
@@ -5,15 +9,26 @@ from .support import Support
 
 class PrivateAssistant:
     """
-    Represents an AI private assistant that sends Supports to one or more speakers in a Conversation.
+    Represents an AI private assistant that sends Supports to one or more speakers in a
+    Conversation.
+
+    Private assistants are not speakers in the Conversation: their messages (Supports) are seen
+    only by the speakers they assist.
 
     :param id: the unique id of the assistant
     :param config: configuration of the assistant, e.g.
-        {"prompt": "...", "model": "gemini-2.5-flash", "temperature": 0.7}. config["prompt"] is the
-        prompt that generates a support message from this assistant (required by generate()).
+        ``{"prompt": "...", "model": "gemini-2.5-flash", "temperature": 0.7}``.
+        ``config["prompt"]`` is the prompt that generates a support message from this assistant
+        (required by :meth:`generate`; see :mod:`convokitai.generation` for the other keys).
     :param supports: the Supports (or their dict forms) produced by this assistant
     :param speakers: ids of the Speakers that can see this assistant's Supports
     :param conversation_id: id of the Conversation the assistant belongs to
+
+    :ivar id: the unique id of the assistant
+    :ivar config: configuration of the assistant
+    :ivar supports: list of the Supports produced by this assistant
+    :ivar speakers: ids of the Speakers that can see this assistant's Supports
+    :ivar conversation_id: id of the Conversation the assistant belongs to
     """
 
     def __init__(
@@ -31,6 +46,12 @@ class PrivateAssistant:
         self.conversation_id = conversation_id
 
     def to_dict(self) -> Dict:
+        """
+        Convert this assistant (including its Supports) into a JSON-serializable dict.
+
+        :return: dict with keys ``"id"``, ``"config"``, ``"supports"``, ``"speakers"``, and
+            ``"conversation_id"``
+        """
         return {
             "id": self.id,
             "config": self.config,
@@ -41,6 +62,12 @@ class PrivateAssistant:
 
     @classmethod
     def from_dict(cls, data: Dict) -> Optional["PrivateAssistant"]:
+        """
+        Build a PrivateAssistant from its dict form (as produced by :meth:`to_dict`).
+
+        :param data: the dict form of the assistant
+        :return: the PrivateAssistant, or None if ``data`` is not a dict
+        """
         if not isinstance(data, dict):
             return None
         return cls(
@@ -54,8 +81,11 @@ class PrivateAssistant:
     @staticmethod
     def normalize_list(value) -> List["PrivateAssistant"]:
         """
-        Convert a list (or dict of id -> value) of PrivateAssistants and/or dicts into a list of PrivateAssistants.
-        Unparseable entries are dropped.
+        Convert a list (or dict of id -> value) of PrivateAssistants and/or dicts into a list of
+        PrivateAssistants. Entries that are neither are dropped.
+
+        :param value: a list or dict of PrivateAssistants and/or their dict forms (or None)
+        :return: a list of PrivateAssistants
         """
         if isinstance(value, dict):
             value = value.values()
@@ -79,20 +109,30 @@ class PrivateAssistant:
         timestamp: Optional[int] = None,
     ) -> Support:
         """
-        Generate a Support from this assistant with convokit.genai, using the prompt in config["prompt"]
-        (see convokitai.generation for the recognized config keys).
+        Generate a Support from this assistant with ``convokit.genai``, using the prompt in
+        ``config["prompt"]`` (see :mod:`convokitai.generation` for the recognized config keys).
 
-        :param conversation: if given, the conversation transcript (with Supports) up to `reply_to` is
-            included in the prompt, along with earlier Supports replying to `reply_to`
-        :param reply_to: id of the utterance the assisted speaker is replying to (defaults to the last
-            utterance of `conversation`)
+        Example::
+
+            assistant = conversation.get_private_assistant("assistant_1")
+            support = assistant.generate(conversation, draft="I think", append=True)
+
+        :param conversation: if given, the conversation transcript (with Supports) up to
+            ``reply_to`` is included in the prompt, along with earlier Supports replying to
+            ``reply_to``
+        :param reply_to: id of the utterance the assisted speaker is replying to (defaults to the
+            last utterance of ``conversation``)
         :param draft: the draft the assisted speaker has written so far
-        :param append: whether to add the generated support to this assistant and `conversation`
-        :param client: a convokit.genai LLMClient to use instead of building one from the config
-        :param config_manager: GenAIConfigManager used to build the client (defaults to ~/.convokit/config.yml)
+        :param append: whether to add the generated support to this assistant and ``conversation``
+        :param client: a ``convokit.genai`` LLMClient to use instead of building one from the config
+        :param config_manager: GenAIConfigManager used to build the client (defaults to one reading
+            ``~/.convokit/config.yml``)
         :param id: id of the generated support (random if not given)
-        :param timestamp: timestamp of the generated support (defaults to after the conversation's last message)
+        :param timestamp: timestamp of the generated support (defaults to after the conversation's
+            last message)
         :return: the generated Support
+        :raises ValueError: if ``config`` has no ``"prompt"``, or if ``append`` is True and no
+            ``conversation`` is given
         """
         from . import generation
 

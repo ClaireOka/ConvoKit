@@ -1,3 +1,7 @@
+"""
+The ConvoKit AI Speaker class, which may represent a human or an AI speaker.
+"""
+
 from typing import Dict, Optional
 
 from convokit.model import Speaker as BaseSpeaker
@@ -8,20 +12,23 @@ class Speaker(BaseSpeaker):
     """
     Represents a single speaker in a dataset, which may be a human or an AI.
 
-    Takes the same arguments as convokit.Speaker, plus:
+    Takes the same arguments as ``convokit.Speaker``, plus ``is_ai`` and ``ai_meta``.
+
+    If ``meta`` contains ``"is_ai"`` / ``"ai_meta"`` entries (as in a dumped corpus) and the
+    corresponding arguments are not given, they are moved out of ``meta`` into the attributes.
+    A legacy ``"role"`` entry in ``meta`` is moved into ``ai_meta["role"]``.
 
     :param is_ai: whether this speaker is known to be an LLM agent
-    :param ai_meta: metadata for ConvoKitAI (empty if is_ai is False). Recognized keys:
+    :param ai_meta: metadata for ConvoKit AI (empty if ``is_ai`` is False). Recognized keys:
 
-        - "config": dict configuration that generates messages for this speaker
-        - "role": the speaker's role in the conversation, e.g. "participant", "public assistant"
-
-    If `meta` contains "is_ai" / "ai_meta" entries (as in a dumped corpus) and the
-    corresponding arguments are not given, they are moved out of `meta` into the attributes.
-    A legacy "role" entry in `meta` is moved into ai_meta["role"].
+        - ``"config"``: generation config for this speaker's messages, used by :meth:`generate`
+          (see :mod:`convokitai.generation`)
+        - ``"role"``: the speaker's role in the conversation, e.g. ``"participant"`` or
+          ``"public assistant"``
 
     :ivar is_ai: whether this speaker is known to be an LLM agent
-    :ivar ai_meta: metadata for ConvoKitAI. Assigning a dict merges it into the existing ai_meta.
+    :ivar ai_meta: metadata for ConvoKit AI. Assigning a dict merges it into the existing
+        ``ai_meta``.
     """
 
     def __init__(
@@ -45,8 +52,8 @@ class Speaker(BaseSpeaker):
     @classmethod
     def _from_base(cls, speaker: BaseSpeaker) -> "Speaker":
         """
-        Convert a convokit.Speaker into a convokitai Speaker in place, moving AI fields out of its metadata.
-        Metadata deletion must be unlocked by the caller if the speaker has an owner.
+        Convert a ``convokit.Speaker`` into a convokitai Speaker in place, moving AI fields out of
+        its metadata. Metadata deletion must be unlocked by the caller if the speaker has an owner.
         """
         speaker.__class__ = cls
         speaker._is_ai = bool(speaker.meta.get("is_ai", False))
@@ -58,11 +65,13 @@ class Speaker(BaseSpeaker):
         return speaker
 
     def _migrate_legacy_role(self, role) -> None:
+        """Move a legacy ``meta["role"]`` value into ``ai_meta["role"]`` unless already set."""
         if role is not None and "role" not in self.ai_meta:
             self.ai_meta = {"role": role}
 
     @property
     def is_ai(self) -> bool:
+        """Whether this speaker is known to be an LLM agent."""
         return getattr(self, "_is_ai", False)
 
     @is_ai.setter
@@ -71,6 +80,7 @@ class Speaker(BaseSpeaker):
 
     @property
     def ai_meta(self) -> Dict:
+        """The ConvoKit AI metadata of this speaker (a copy; assign to modify)."""
         return as_dict(getattr(self, "_ai_meta", {}))
 
     @ai_meta.setter
@@ -91,17 +101,30 @@ class Speaker(BaseSpeaker):
         timestamp: Optional[int] = None,
     ):
         """
-        Generate an Utterance for this speaker with convokit.genai, using the prompt in ai_meta["config"]
-        (see convokitai.generation for the recognized config keys). Requires is_ai to be True.
+        Generate an Utterance for this speaker with ``convokit.genai``, using the prompt in
+        ``ai_meta["config"]`` (see :mod:`convokitai.generation` for the recognized config keys).
+        Requires ``is_ai`` to be True.
 
-        :param conversation: if given, the conversation transcript (up to `reply_to`) is included in the prompt
-        :param reply_to: id of the utterance to reply to (defaults to the last utterance of `conversation`)
-        :param append: whether to add the generated utterance to `conversation` (and its Corpus)
-        :param client: a convokit.genai LLMClient to use instead of building one from the config
-        :param config_manager: GenAIConfigManager used to build the client (defaults to ~/.convokit/config.yml)
+        Example::
+
+            speaker = corpus.get_speaker("bot")
+            utt = speaker.generate(conversation, append=True)
+
+        :param conversation: if given, the conversation transcript (up to ``reply_to``) is included
+            in the prompt
+        :param reply_to: id of the utterance to reply to (defaults to the last utterance of
+            ``conversation``)
+        :param append: whether to add the generated utterance to ``conversation`` (and its Corpus)
+        :param client: a ``convokit.genai`` LLMClient to use instead of building one from the config
+        :param config_manager: GenAIConfigManager used to build the client (defaults to one reading
+            ``~/.convokit/config.yml``)
         :param id: id of the generated utterance (random if not given)
-        :param timestamp: timestamp of the generated utterance (defaults to after the conversation's last message)
-        :return: the generated Utterance
+        :param timestamp: timestamp of the generated utterance (defaults to after the
+            conversation's last message)
+        :return: the generated Utterance (if ``append`` is True, the Utterance as stored in the
+            Corpus)
+        :raises ValueError: if the speaker is not an AI speaker, has no ``"prompt"`` in
+            ``ai_meta["config"]``, or if ``append`` is True and no ``conversation`` is given
         """
         from . import generation
         from .utterance import Utterance

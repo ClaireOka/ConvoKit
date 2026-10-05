@@ -1,9 +1,10 @@
 """
-LLM access for the evaluation transformers.
+LLM access for the evaluation Transformers.
 
-convokit.genai's GPTClient always sends ``temperature`` and ``max_tokens``, which OpenAI's
-reasoning models (gpt-5, gpt-5-mini) reject. GPT5Client keeps the convokit.genai LLMClient
-interface and adds ``reasoning_effort``, a fixed ``seed`` and JSON mode.
+``convokit.genai``'s ``GPTClient`` always sends ``temperature`` and ``max_tokens``, which
+OpenAI's reasoning models (gpt-5, gpt-5-mini) reject. ``GPT5Client`` keeps the
+``convokit.genai`` ``LLMClient`` interface and adds ``reasoning_effort``, an optional fixed
+``seed`` and JSON mode.
 """
 
 import json
@@ -23,7 +24,12 @@ RETRY_AFTER = 10  # seconds
 
 def parse_json(text: str):
     """
-    Parse the JSON object or array in a model reply, tolerating ``` fences and control characters.
+    Parse the JSON object or array in a model reply, tolerating Markdown code fences and control
+    characters.
+
+    :param text: the model reply
+    :return: the parsed JSON (dict or list)
+    :raises json.JSONDecodeError: if the reply is not valid JSON
     """
     text = re.sub(r"^```(json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     return json.loads(text, strict=False)
@@ -31,14 +37,22 @@ def parse_json(text: str):
 
 class GPT5Client(LLMClient):
     """
-    Client for OpenAI reasoning models (the gpt-5 family) with the convokit.genai LLMClient interface.
+    Client for OpenAI reasoning models (the gpt-5 family) with the ``convokit.genai``
+    ``LLMClient`` interface.
 
-    :param model: model name, e.g. "gpt-5" or "gpt-5-mini"
-    :param config_manager: GenAIConfigManager holding the "gpt" API key (default: ~/.convokit/config.yml)
-    :param reasoning_effort: OpenAI ``reasoning_effort`` ("minimal", "low", "medium", "high")
-    :param seed: OpenAI ``seed`` for best-effort determinism
-    :param json_mode: ask for ``response_format={"type": "json_object"}``
+    Failed calls (and, in ``generate_json``, unparseable replies) are retried after a
+    10-second wait.
+
+    :param model: model name, e.g. ``"gpt-5"`` or ``"gpt-5-mini"``
+    :param config_manager: GenAIConfigManager holding the ``"gpt"`` API key (default: a
+        GenAIConfigManager reading ``~/.convokit/config.yml``)
+    :param reasoning_effort: OpenAI ``reasoning_effort`` (``"minimal"``, ``"low"``,
+        ``"medium"`` or ``"high"``)
+    :param seed: OpenAI ``seed`` for best-effort determinism (not sent if None)
+    :param json_mode: request ``response_format={"type": "json_object"}``
     :param max_retries: how many times to retry a failed call or an unparseable JSON reply
+    :raises ImportError: if the ``openai`` package is not installed
+    :raises ValueError: if no OpenAI API key is configured
     """
 
     def __init__(
@@ -92,10 +106,12 @@ class GPT5Client(LLMClient):
 
     def generate(self, prompt: str, **kwargs) -> LLMResponse:
         """
-        Generate a reply for the prompt.
+        Generate a reply to a prompt.
 
         :param prompt: the prompt
-        :return: LLMResponse
+        :param kwargs: ignored; accepted for compatibility with the ``LLMClient`` interface
+        :return: an LLMResponse with the reply text, total tokens used (-1 if unknown), latency
+            in seconds and the raw OpenAI response
         """
         start = time.time()
         raw = self._retry(lambda: self._call(prompt))
@@ -109,7 +125,7 @@ class GPT5Client(LLMClient):
 
     def generate_json(self, prompt: str):
         """
-        Generate a reply and parse it as JSON.
+        Generate a reply to a prompt and parse it as JSON.
 
         :param prompt: the prompt
         :return: the parsed JSON (dict or list)

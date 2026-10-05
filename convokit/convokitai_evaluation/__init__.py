@@ -1,9 +1,14 @@
 """
-ConvoKit AI evaluation: metrics for AI-mediated conversations.
+ConvoKit AI evaluation: Transformers that evaluate AI-mediated conversations stored in the
+ConvoKit AI data format (see convokit/convokitai/FORMAT.md).
 
-- CIG: per-utterance conversational information gain, judged by an LLM
-- ClaimTracker: claim-level consensus between participants, and where their claims came from
-- MediatorRedirection: redirection of each mediator turn, via convokit.redirection
+- ``CIG``: per-utterance conversational information gain, rated by an LLM;
+- ``ClaimTracker``: claim-level consensus between participants, and where their claims came from;
+- ``MediatorRedirection``: how much each mediator turn redirected the conversation, computed
+  with ``convokit.redirection``.
+
+``MediatorRedirection`` and its context selectors are ``None`` if ``convokit.redirection`` (and
+its dependencies) cannot be imported.
 """
 
 from .cig import CIG

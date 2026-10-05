@@ -1,9 +1,9 @@
 """
-Contains functions that help with converting / loading / dumping the AI fields of a ConvoKit AI Corpus.
+Helper functions for converting, loading, and dumping the AI fields of a ConvoKit AI Corpus.
 
-The base convokit.Corpus machinery constructs plain convokit.Speaker / Utterance / Conversation
-objects; the functions here convert those into their convokitai counterparts and move the AI
-fields between metadata (on disk) and attributes (in memory).
+The base ``convokit.Corpus`` machinery constructs plain ``convokit`` Speaker / Utterance /
+Conversation objects; the functions here convert those into their convokitai counterparts and move
+the AI fields between metadata (on disk) and attributes (in memory).
 """
 
 import json
@@ -17,13 +17,14 @@ from .speaker import Speaker
 from .support import Support
 from .utterance import Utterance
 
-# corpus-level supports file written by earlier iterations of the format
+# corpus-level supports file written by older versions of the format
 LEGACY_SUPPORTS_FILENAME = "supports.json"
 
 COMPONENT_CLASSES = {"speaker": Speaker, "utterance": Utterance, "conversation": Conversation}
 
 
 def _unlocked_meta_deletion(corpus, obj_type, fn):
+    """Call ``fn()`` with metadata deletion temporarily unlocked for ``obj_type``."""
     corpus.meta_index.lock_metadata_deletion[obj_type] = False
     try:
         return fn()
@@ -33,9 +34,14 @@ def _unlocked_meta_deletion(corpus, obj_type, fn):
 
 def upgrade_components(corpus) -> None:
     """
-    Convert every convokit.Speaker / Utterance / Conversation in the corpus into its convokitai
-    counterpart (in place), moving AI fields out of their metadata. Components that are already
-    convokitai objects are left untouched, so this is safe to call repeatedly.
+    Convert every ``convokit`` Speaker / Utterance / Conversation in the corpus into its convokitai
+    counterpart (in place), moving AI fields out of their metadata.
+
+    Components that are already convokitai objects are left untouched, so this is safe to call
+    repeatedly.
+
+    :param corpus: the Corpus to convert
+    :return: None
     """
     if not hasattr(corpus, "utterances"):
         # empty corpus
@@ -68,11 +74,16 @@ def upgrade_components(corpus) -> None:
 
 def extract_corpus_ai_fields(corpus, filename: Optional[str] = None) -> Dict:
     """
-    Remove the corpus-level AI fields from corpus.meta and return them, along with any corpus-level
-    assistants / supports stored by earlier iterations of the format (including supports.json in the
-    corpus directory `filename`), so they can be migrated onto conversations.
+    Remove the corpus-level AI fields from ``corpus.meta`` and return them.
 
-    :return: dict with keys "ai_meta", "has_ai" (None if not stored), "legacy_assistants", "legacy_supports"
+    Also returns any corpus-level assistants / supports stored by older versions of the format
+    (including a ``supports.json`` file in the corpus directory), so they can be migrated onto
+    conversations.
+
+    :param corpus: the Corpus to read from (its metadata is modified)
+    :param filename: the corpus directory to look for a legacy ``supports.json`` in, if any
+    :return: dict with keys ``"ai_meta"``, ``"has_ai"`` (None if not stored),
+        ``"legacy_assistants"``, and ``"legacy_supports"``
     """
     ai_meta = as_dict(corpus.meta.get("ai_meta"))
     fields = {
@@ -100,10 +111,18 @@ def extract_corpus_ai_fields(corpus, filename: Optional[str] = None) -> Dict:
 
 def migrate_legacy_assistants_and_supports(corpus, assistants, supports: List[Dict]) -> None:
     """
-    Move corpus-level assistants and supports (from earlier iterations of the format) onto the
-    Conversations they belong to: each assistant is added to the Conversation matching its
-    conversation_id, and each support to the PrivateAssistant matching its private_assistant_id. Supports with
-    no matching assistant are added directly to the Conversation matching their conversation_id.
+    Move corpus-level assistants and supports (from older versions of the format) onto the
+    Conversations they belong to.
+
+    Each assistant is added to the Conversation matching its ``conversation_id``, and each support
+    to the PrivateAssistant matching its ``private_assistant_id``. Supports with no matching
+    assistant are added directly to the Conversation matching their ``conversation_id``. Entries
+    with no matching Conversation are dropped.
+
+    :param corpus: the Corpus to modify
+    :param assistants: PrivateAssistants (or their dict forms)
+    :param supports: Supports in dict form
+    :return: None
     """
     assistants = PrivateAssistant.normalize_list(assistants)
     if not assistants and not supports:
@@ -137,8 +156,11 @@ def migrate_legacy_assistants_and_supports(corpus, assistants, supports: List[Di
 
 def stash_ai_fields_in_meta(corpus) -> None:
     """
-    Write AI fields into the metadata of every component and the corpus (the on-disk format), so the
-    base convokit dump writes them out. Undo with unstash_ai_fields_from_meta().
+    Write AI fields into the metadata of every component and the corpus (the on-disk format), so
+    the base ``convokit`` dump writes them out. Undo with :func:`unstash_ai_fields_from_meta`.
+
+    :param corpus: the Corpus to modify
+    :return: None
     """
     type_check = corpus.meta_index.type_check
     # keys missing from the index are silently skipped by the base dump, so make sure they get indexed
@@ -163,7 +185,11 @@ def stash_ai_fields_in_meta(corpus) -> None:
 
 def unstash_ai_fields_from_meta(corpus) -> None:
     """
-    Remove the AI fields written by stash_ai_fields_in_meta() from all metadata and from the index.
+    Remove the AI fields written by :func:`stash_ai_fields_in_meta` from all metadata and from the
+    metadata index.
+
+    :param corpus: the Corpus to modify
+    :return: None
     """
     for obj_type in COMPONENT_CLASSES:
 

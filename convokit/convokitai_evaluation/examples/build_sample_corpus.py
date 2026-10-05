@@ -1,20 +1,52 @@
 """
-Build the sample corpus used by the examples: the completed cohorts of one simulated
-Track 1 experiment (one mediator, two agent participants, one cohort per stance pair) for each
-of three mediators, converted with convokitai-simulation's export_to_corpus and saved to
-``sample_corpus/``.
+Rebuild the sample corpus bundled with the examples (``sample_corpus/``).
 
-    python build_sample_corpus.py
+This script is only needed to regenerate ``sample_corpus/``; the example notebooks load the
+bundled copy and do not need to run it.
 
-Needs the TrAuSt-util simulation results (SIM) and the convokitai-simulation package.
+The sample corpus contains the completed cohorts of one simulated Deliberate Lab experiment
+(one mediator and two simulated participants per cohort, one cohort per stance pair) for each
+of three mediators: a greeting baseline, a paraphrasing baseline, and a constructive mediator.
+The experiments are converted to a ConvoKit AI corpus with ``export_to_corpus`` from the ``convokitai-simulation`` package, and each conversation's
+metadata is extended with ``mediator`` (the mediator label), ``topic``, ``statement`` (the
+debate statement) and ``pre_survey`` (speaker id -> the reason each participant gave for their
+stance before the conversation).
+
+Usage::
+
+    python build_sample_corpus.py /path/to/simulation_results
+
+``export_to_corpus`` must be importable, e.g. by installing the simulation package
+(``pip install -e convokit/convokitai-simulation`` from the repository root) or by adding
+``convokit/convokitai-simulation`` to ``PYTHONPATH``.
+
+The ``simulation_results`` folder holds the output of the simulation runs. The script reads
+the sub-folders listed in ``SOURCES`` (``baseline_mediators/track 1/clean`` and
+``final_pool_batches/batch1/Track 1/clean``, relative to ``simulation_results``), and each of
+those sub-folders must contain:
+
+- ``runs.json``: a list of runs, each with ``mediator`` (the mediator's submission file name)
+  and ``experiments`` (a list of objects with ``experiment_id`` and ``completed_cohorts``, the
+  ids of the cohorts that finished);
+- ``<experiment_id>/export.json``: the Deliberate Lab export of that experiment, whose
+  ``cohortMap`` holds the cohorts and whose stages include ``chat-round-1`` (the chat, with the
+  debate statement) and ``pre-survey-1`` (the pre-conversation survey, whose answer
+  ``pre_q1_a.5`` is the participant's reason for their stance);
+- ``<experiment_id>/meta.json``: an object whose ``topic`` is the debate topic.
+
+For each mediator, the first experiment in ``runs.json`` with completed cohorts is used.
 """
 
 import json
 import os
+import sys
+
+if len(sys.argv) != 2:
+    sys.exit("usage: python build_sample_corpus.py /path/to/simulation_results")
 
 from export_to_corpus import export_to_corpus
 
-SIM = "/Users/caiyang/Documents/Research Projects/Deliberate Lab/GitHub/TrAuSt-util/simulation_results"
+SIM = sys.argv[1].rstrip("/")
 SOURCES = {  # mediator label -> (submission file, folder whose runs.json lists its experiments)
     "greeting": ("greeting_mediator.yaml", f"{SIM}/baseline_mediators/track 1/clean"),
     "paraphrase": (
@@ -30,7 +62,14 @@ OUT = os.path.dirname(os.path.abspath(__file__))
 
 
 def load_one(mediator, folder):
-    """The export of the first experiment run by `mediator`, trimmed to its completed cohorts."""
+    """
+    Load the export of the first experiment in ``folder`` run by ``mediator`` that has completed
+    cohorts, keeping only those cohorts.
+
+    :param mediator: the mediator's submission file name, as listed in ``runs.json``
+    :param folder: folder containing ``runs.json`` and one sub-folder per experiment
+    :return: the trimmed export and the experiment's topic
+    """
     runs = json.load(open(f"{folder}/runs.json"))
     experiment = next(
         e
@@ -47,7 +86,12 @@ def load_one(mediator, folder):
 
 
 def statement(export):
-    """The debate statement shown with the chat, without its 'Statement: "..."' wrapping."""
+    """
+    Get the debate statement shown with the chat, without its ``Statement: "..."`` wrapping.
+
+    :param export: a Deliberate Lab experiment export
+    :return: the statement text
+    """
     text = export["stageMap"]["chat-round-1"]["descriptions"]["primaryText"].strip()
     return text.removeprefix("Statement:").strip().strip('"')
 

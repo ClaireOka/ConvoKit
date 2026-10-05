@@ -1,17 +1,31 @@
+"""
+The Support class: a private message from a PrivateAssistant to the speakers it assists.
+"""
+
 from typing import Dict, Iterable, List, Optional, Union
 
 
 class Support:
     """
-    Represents a single message from a PrivateAssistant to the speaker(s) it assists, outside the main Conversation.
-    The speakers that can see a Support are given by its PrivateAssistant's `speakers`.
+    Represents a single message from a PrivateAssistant to the speaker(s) it assists, outside the
+    main Conversation.
+
+    The speakers that can see a Support are given by its PrivateAssistant's ``speakers``.
 
     :param id: the unique id of the support
-    :param text: output of the support
+    :param text: the text of the support message
     :param reply_to: id of the utterance the assisted speaker is replying to
-    :param draft: the draft of the post the assisted speaker has written so far ("" means the draft is empty)
+    :param draft: the draft of the reply the assisted speaker has written so far (``""`` means the
+        draft is empty)
     :param private_assistant_id: id of the PrivateAssistant that produced the support
-    :param timestamp: the timestamp the support was sent
+    :param timestamp: the time the support was sent (an int, or a string)
+
+    :ivar id: the unique id of the support
+    :ivar text: the text of the support message
+    :ivar reply_to: id of the utterance the assisted speaker is replying to
+    :ivar draft: the assisted speaker's draft at the time of the support
+    :ivar private_assistant_id: id of the PrivateAssistant that produced the support
+    :ivar timestamp: the time the support was sent
     """
 
     def __init__(
@@ -31,6 +45,12 @@ class Support:
         self.timestamp = timestamp
 
     def to_dict(self) -> Dict:
+        """
+        Convert this support into a JSON-serializable dict.
+
+        :return: dict with keys ``"id"``, ``"text"``, ``"reply_to"``, ``"draft"``,
+            ``"private_assistant_id"``, and ``"timestamp"``
+        """
         return {
             "id": self.id,
             "text": self.text,
@@ -43,7 +63,11 @@ class Support:
     @classmethod
     def from_dict(cls, data: Dict) -> Optional["Support"]:
         """
-        Build a Support from its dict form. Keys outside the Support fields are ignored.
+        Build a Support from its dict form (as produced by :meth:`to_dict`). Keys outside the
+        Support fields are ignored.
+
+        :param data: the dict form of the support
+        :return: the Support, or None if ``data`` is not a dict
         """
         if not isinstance(data, dict):
             return None
@@ -52,7 +76,7 @@ class Support:
             text=data.get("text", ""),
             reply_to=data.get("reply_to"),
             draft=data.get("draft", ""),
-            # "assistant_id" is from earlier iterations of the format
+            # legacy key: older versions of the format used "assistant_id"
             private_assistant_id=data.get("private_assistant_id", data.get("assistant_id")),
             timestamp=data.get("timestamp"),
         )
@@ -60,7 +84,11 @@ class Support:
     @staticmethod
     def normalize_list(value: Optional[Iterable]) -> List["Support"]:
         """
-        Convert a list of Supports and/or dicts into a list of Supports. Unparseable entries are dropped.
+        Convert a list of Supports and/or dicts into a list of Supports. Entries that are neither
+        are dropped.
+
+        :param value: an iterable of Supports and/or their dict forms (or None)
+        :return: a list of Supports
         """
         normalized = []
         for item in value or []:
@@ -72,12 +100,16 @@ class Support:
 
     def get_transcript(self, conversation, supports: bool = False) -> str:
         """
-        Get a plain-text transcript of the given Conversation, from its beginning up to and including
-        this support. See Conversation.get_transcript.
+        Get a plain-text transcript of the given Conversation, from its beginning up to and
+        including this support. See :meth:`Conversation.get_transcript
+        <convokitai.Conversation.get_transcript>`.
 
-        :param conversation: the Conversation this support belongs to (Supports don't keep a reference to it)
-        :param supports: whether to include the other Supports before this one (this support is always shown)
+        :param conversation: the Conversation this support belongs to (Supports don't keep a
+            reference to it)
+        :param supports: whether to include the other Supports before this one (this support is
+            always shown)
         :return: the transcript as a single string
+        :raises ValueError: if this support is not in ``conversation``
         """
         return conversation.get_transcript(supports=supports, until=self)
 

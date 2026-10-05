@@ -1,16 +1,21 @@
-"""export_to_corpus.py — convert Deliberate Lab experiment exports (the JSON returned by
-Client.export_experiment) into a convokitai Corpus.
+"""Convert Deliberate Lab experiment exports into a ``convokitai`` Corpus.
 
-Each cohort becomes a Conversation. Participant and mediator chat messages become
-Utterances (system messages are skipped), with mediators as speakers with role "public assistant",
-and each participant's private assistant messages become Supports of that conversation's
-PrivateAssistants, and are also attached to the utterance they reply to (the last chat message the participant saw).
+An experiment export is the JSON returned by ``deliberate_lab.Client.export_experiment``
+(or downloaded from the Deliberate Lab web UI). The conversion works as follows:
 
-Usage:
+- Each cohort becomes a Conversation, whose ID is the cohort ID.
+- Participant and mediator chat messages become Utterances; system messages are skipped.
+  Mediators become AI speakers with the role ``"public assistant"``.
+- The messages each participant received from their private assistant become Supports of
+  that conversation's PrivateAssistants. Each Support is also attached to the Utterance it
+  replies to (the last chat message the participant saw).
+
+Example::
+
     import json
     from export_to_corpus import export_to_corpus
 
-    with open("simulation-exp-....json") as f:
+    with open("experiment-export.json") as f:
         corpus = export_to_corpus(json.load(f))
 """
 
@@ -24,14 +29,15 @@ from convokitai import Corpus, PrivateAssistant, Speaker, Support, Utterance
 # what an assistant "says" when it decides not to intervene
 SILENT_SUPPORT_TEXT = "Nothing further to add at this point in the conversation."
 
-# Deliberate Lab apiType -> convokit.genai provider
+# Deliberate Lab apiType -> convokit.genai provider name
 PROVIDERS = {"GEMINI": "gemini", "OPENAI": "gpt", "OLLAMA": "local"}
 
 
 def _strip_speaker_prefix(text: str, name: str) -> str:
-    """Remove a leading "(02:40) 🐻 Bear:" from a message. Agents see the transcript in that
-    format and often copy it into their replies. Only the sender's own name is stripped, and
-    the timestamp and avatar are optional."""
+    """Remove a leading ``(02:40) 🐻 Bear:`` from a message.
+
+    Agents see the transcript in that format and often copy it into their replies. Only the
+    sender's own name is stripped; the timestamp and avatar are optional."""
     if not name:
         return text
     prefix = rf"^\s*(?:\(\d{{1,2}}:\d{{2}}(?::\d{{2}})?\)\s*)?(?:\S+\s+)?{re.escape(name)}\s*:\s*"
@@ -39,7 +45,7 @@ def _strip_speaker_prefix(text: str, name: str) -> str:
 
 
 def _timestamp_ms(timestamp) -> int | None:
-    """Firestore timestamp ({seconds, nanoseconds}, or _seconds/_nanoseconds) -> milliseconds."""
+    """Convert a Firestore timestamp (``{seconds, nanoseconds}`` or ``_seconds``/``_nanoseconds``) to ms."""
     if not isinstance(timestamp, dict):
         return timestamp
     seconds = timestamp.get("seconds", timestamp.get("_seconds", 0))
@@ -49,6 +55,7 @@ def _timestamp_ms(timestamp) -> int | None:
 
 def _prompt_text(prompt) -> str:
     """Join the TEXT items of a prompt (a list of items, or a dict of lists) into one string.
+
     Context items are dropped, since convokitai adds the transcript itself when generating."""
     if isinstance(prompt, dict):
         prompt = [item for items in prompt.values() for item in items]
@@ -56,8 +63,9 @@ def _prompt_text(prompt) -> str:
 
 
 def _generation_config(template: dict | None, stage_id: str, model_settings: dict | None = None) -> dict:
-    """Build a convokitai generation config from a Deliberate Lab agent template. The full
-    template is kept under "deliberate_lab" so the simulation can be recreated."""
+    """Build a convokitai generation config from a Deliberate Lab agent template.
+
+    The full template is kept under ``"deliberate_lab"`` so the simulation can be recreated."""
     if not template:
         return {}
     persona = template.get("persona", {})
@@ -77,10 +85,12 @@ def _generation_config(template: dict | None, stage_id: str, model_settings: dic
 
 
 def _without_template(config: dict) -> dict:
+    """Return the generation config without its ``"deliberate_lab"`` template."""
     return {k: v for k, v in config.items() if k != "deliberate_lab"}
 
 
 def _chat_stage_ids(export: dict) -> list[str]:
+    """Return the IDs of the experiment's chat stages, in stage order."""
     stage_map = export.get("stageMap", {})
     stage_ids = export.get("experiment", {}).get("stageIds") or list(stage_map)
     return [sid for sid in stage_ids if stage_map.get(sid, {}).get("kind") == "chat"]
@@ -93,6 +103,8 @@ def _add_export(
     convo_meta: dict[str, dict],
     keep_silent_supports: bool,
 ) -> None:
+    """Add one experiment export's utterances, and its conversations' metadata, to the given
+    collections (modified in place)."""
     experiment = export.get("experiment", {})
     participant_map = export.get("participantMap", {})
     mediator_map = export.get("agentMediatorMap", {})
@@ -238,14 +250,19 @@ def _add_export(
 
 def export_to_corpus(exports: dict | Iterable[dict], keep_silent_supports: bool = True) -> Corpus:
     """
-    Convert one or more Deliberate Lab experiment exports into a convokitai Corpus, with one
-    Conversation per cohort.
+    Convert one or more Deliberate Lab experiment exports into a ``convokitai`` Corpus, with
+    one Conversation per cohort.
 
-    :param exports: an experiment export, or a list of them
-    :param keep_silent_supports: whether to keep the assistant messages sent when an assistant
-        decided not to intervene (SILENT_SUPPORT_TEXT). Supports are stored on the conversation's
-        PrivateAssistants and on the utterance each one replies to (utterance.supports).
+    Each Conversation's meta has the experiment ID and name, the cohort name, and the chat
+    stage's description and blocks; its ai_meta has the speaker aliases (display names) and
+    the conversation's PrivateAssistants.
+
+    :param exports: an experiment export, or an iterable of them
+    :param keep_silent_supports: whether to keep the messages an assistant sends when it decides
+        not to intervene (``SILENT_SUPPORT_TEXT``). Supports are stored on the conversation's
+        PrivateAssistants and on the utterance each one replies to (``utterance.supports``).
     :return: the Corpus
+    :raises ValueError: if the exports contain no chat messages
     """
     if isinstance(exports, dict):
         exports = [exports]

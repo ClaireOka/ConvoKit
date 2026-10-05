@@ -1,9 +1,16 @@
+"""Run a Deliberate Lab agent simulation and return it as a ``convokitai`` Corpus."""
+
 from pathlib import Path
 
 from convokitai import Corpus
 from dl_container import BackendContainer, FIRESTORE_PORT
 from local_backend import LocalBackend
-from create_simulation import FirebaseBackend, _seed_gemini_api_key, create_simulation
+from create_simulation import (
+    FirebaseBackend,
+    _seed_gemini_api_key,
+    create_simulation,
+    load_simulation_config,
+)
 
 
 def simulate(
@@ -15,20 +22,48 @@ def simulate(
     backend: FirebaseBackend | None = None,
     wait_timeout: float | None = None,
 ) -> Corpus:
-    """Run a simulation and return the conversations as a convokitai Corpus.
+    """Run a simulation and return its conversations as a ``convokitai`` Corpus.
 
-    Runs on the bundled local backend by default. To run on a deployed
-    Deliberate Lab instead, pass its Firebase `project_id` and a `dl_api_key`
-    (a Deliberate Lab API key from that deployment's web UI, Settings ->
-    API Keys), or a prebuilt `backend`.
+    By default the simulation runs on a local Deliberate Lab backend: the
+    published backend container is started (see
+    :class:`dl_container.BackendContainer`), the Gemini key is stored in it, and
+    the container is stopped when the simulation finishes. To run on your own
+    Deliberate Lab deployment instead, pass its Firebase ``project_id`` and a
+    ``dl_api_key``, or a prebuilt ``backend``.
 
-    sim_yaml is the simulation YAML: a file path, the YAML text, or the parsed dict.
-    wait_timeout is how many seconds to wait for the conversations before keeping
-    them as they stand (defaults to the YAML's max_time plus 5 minutes).
+    Example::
 
-    gemini_api_key is required locally. A deployed backend uses the Gemini key
-    saved in its web UI's Settings by the account that owns the API key.
+        from simulation import simulate
+
+        corpus = simulate(gemini_api_key="...", sim_yaml="simulation.yaml")
+        corpus.print_summary_stats()
+
+    :param gemini_api_key: Gemini API key the agents use. Required for the local
+        backend; must not be passed with a deployed backend, which uses the
+        Gemini key saved in its web UI (Settings) by the account that owns the
+        Deliberate Lab API key.
+    :param sim_yaml: the simulation YAML, as a file path, the YAML text, or the
+        parsed dict (see :mod:`create_simulation` for the format).
+    :param project_id: Firebase project ID of a deployed Deliberate Lab to run
+        on instead of the local backend. Requires ``dl_api_key``; cannot be
+        combined with ``backend``.
+    :param dl_api_key: Deliberate Lab API key, created in the deployment's web
+        UI under Settings -> API Keys. Used only with ``project_id``.
+    :param backend: a :class:`create_simulation.FirebaseBackend` to run on, as
+        an alternative to ``project_id`` and ``dl_api_key``.
+    :param wait_timeout: seconds to wait for the conversations to finish before
+        keeping them as they stand. Defaults to the YAML's ``max_time`` plus 5
+        minutes.
+    :return: a Corpus with one Conversation per pairing and block combination
+        (see :func:`create_simulation.create_simulation`).
+    :raises ValueError: if ``sim_yaml`` is missing or invalid, or the arguments
+        are inconsistent: both ``project_id`` and ``backend``, ``project_id``
+        without ``dl_api_key``, ``gemini_api_key`` with a deployed backend, or
+        no ``gemini_api_key`` for the local backend.
     """
+    # check the YAML before starting anything, since the local backend takes minutes to start
+    config = load_simulation_config(sim_yaml)
+
     if project_id is not None:
         if backend is not None:
             raise ValueError("pass either project_id or backend, not both")
@@ -45,7 +80,7 @@ def simulate(
                 "gemini_api_key is only used with the local backend; on your own "
                 "deployment, save the Gemini key in the web UI's Settings instead"
             )
-        return create_simulation(backend, sim_yaml, wait_timeout)
+        return create_simulation(backend, config, wait_timeout)
 
     if not gemini_api_key:
         raise ValueError("gemini_api_key is required for the local backend")
@@ -54,9 +89,9 @@ def simulate(
             ".",
             reuse_running=True,
             firestore_port=FIRESTORE_PORT,
-            # the functions can take minutes to load under udocker (Colab)
+            # the functions can take minutes to load under udocker (e.g. on Colab)
             startup_timeout=600,
         ) as local:
             _seed_gemini_api_key(local, gemini_api_key)
-            return create_simulation(local, sim_yaml, wait_timeout)
+            return create_simulation(local, config, wait_timeout)
 

@@ -24,9 +24,9 @@ in chronological order:
 4. Memory update. The relation is mapped deterministically to an operation; the model never
    chooses the operation, and no entry is ever deleted:
 
-   ================================  ======================================================
-   relation                          operation
-   ================================  ======================================================
+   ================================  ==========================================================
+   relation (to the chosen target)   operation
+   ================================  ==========================================================
    neutral, or no valid target       ADD a new entry
    any relation, other speaker       ADD a new entry with a link to the other speaker's claim
    equivalent / backward_entail      RESTATE: log the restatement on the existing entry
@@ -35,23 +35,27 @@ in chronological order:
    contradiction, supersedes=true    SUPERSEDE: mark the old entry ``retracted`` and link the
                                      new entry to it
    contradiction, supersedes=false   ADD a new entry with a contradiction link (both held)
-   ================================  ======================================================
+   ================================  ==========================================================
 
-   Every entry records ``first_turn``, ``last_turn``, ``history``, ``restated``, ``links`` and
-   ``status``; a speaker's held claims are their active ``own`` entries.
+   Rows are checked from top to bottom; the other rows apply when the target is one of the
+   speaker's own claims. Every entry records ``first_turn``, ``last_turn``, ``history``,
+   ``restated``, ``links`` and ``status``; a speaker's held claims are their active ``own``
+   entries.
 
 Participants' memories may be seeded from a pre-survey statement (``seed_text_func``) to
 establish their initial position.
 
 Measurement
 -----------
-After the last utterance, an LLM (``claim_agreement_prompt``) labels pairs of claims across the
-two participants' lists as ``agree`` or ``contradiction``, once on the seed lists and once on the
-final held lists. Agreement is the mean, over both participants, of the share of their claims
-with an agreeing counterpart. Per conversation:
+After the last utterance, for each pair of participants, an LLM (``claim_agreement_prompt``)
+labels pairs of claims across the two participants' lists as ``agree`` or ``contradiction``,
+once on the seed lists and once on the final held lists. A pair's agreement is the mean, over
+its two participants, of the share of their claims with an agreeing counterpart; the
+conversation's agreement is the mean over participant pairs. Per conversation:
 
 - ``agreement_gain`` = (final - initial) / (1 - initial): the fraction of the remaining
-  disagreement closed during the conversation (negative if agreement decreased).
+  disagreement closed during the conversation (negative if agreement decreased; undefined if
+  the initial agreement is already 1).
 
 Per participant, using the links recorded at consolidation time to find which speaker stated a
 claim first (``origin_of``):
@@ -61,7 +65,7 @@ claim first (``origin_of``):
 - ``share_new_common_ground``: of the claims newly shared with a partner at the end (not shared
   at the start), the share first stated by the mediator.
 
-Reference paper: CIG: Measuring Conversational Information Gain in Deliberative Dialogues with
+Reference: CIG: Measuring Conversational Information Gain in Deliberative Dialogues with
 Semantic Memory Dynamics, https://aclanthology.org/2026.acl-long.2203/
 """
 
@@ -104,15 +108,17 @@ ADOPT_RELS = ("equivalent", "forward_entail")
 
 
 def _turn(turn) -> int:
+    """Turn id as a number, with the pre-survey as -1."""
     return -1 if turn == PRE_SURVEY else int(turn)
 
 
 def _entry_index(entry_id: str) -> int:
+    """Position of a memory entry from its id ("c_<n>" -> n)."""
     return int(entry_id.split("_")[1])
 
 
 def _relation(label) -> Optional[str]:
-    """Normalise the judge's label: "agree"/"agreement" -> "agree", "contradict..." -> "contradiction"."""
+    """Normalize the LLM's label: "agree..." -> "agree", "contradict..." -> "contradiction", else None."""
     label = str(label or "").strip().lower()
     if label.startswith("agree"):
         return "agree"
@@ -130,19 +136,27 @@ class _VectorIndex:
     def upsert(self, speaker: str, entry_id: str, vector):
         self.vectors.setdefault(speaker, {})[entry_id] = np.asarray(vector)
 
-    def nearest(self, speaker: str, query, k: int) -> List[str]:
+    def nearest(self, speaker: str, query, k: int, among=None) -> List[str]:
+        """The ids of the ``k`` entries of ``speaker`` nearest to ``query``, only considering
+        the ids in ``among`` if it is given."""
         entries = self.vectors.get(speaker, {})
-        if not entries:
+        ids = [i for i in entries if among is None or i in among]
+        if not ids:
             return []
-        ids = list(entries)
         scores = np.stack([entries[i] for i in ids]) @ np.asarray(query)
         return [ids[j] for j in np.argsort(-scores)[:k]]
 
 
 class ClaimTracker(Transformer):
     """
-    Tracks the claims of every speaker in each conversation and measures the consensus the
-    participants reach (see the module docstring for the method).
+    ConvoKit Transformer that tracks the claims of every speaker in each conversation and
+    measures the consensus the participants reach.
+
+    Each utterance is decomposed by an LLM into atomic claims, which are consolidated into a
+    per-speaker claim memory (added, restated, refined or superseded). At the end, an LLM judges
+    which claims the participants agree on before and after the conversation, and the claim
+    links are used to find whether a participant's claims first came from the mediator or from
+    another participant. See the module docstring for the full method.
 
     Usage::
 
@@ -160,9 +174,12 @@ class ClaimTracker(Transformer):
       ``claims_initial``, ``claims_final``, ``claims_share_from_mediator``,
       ``claims_share_from_partner``, ``claims_share_new_common_ground``.
 
-    The corpus must say who the mediator is and what each speaker is called in the chat; by
+    The corpus must identify the mediator and the name each speaker goes by in the chat. By
     default these come from the ConvoKit AI fields (``speaker.ai_meta["role"]`` and
-    ``conversation.alias``), and can be replaced with ``is_mediator`` / ``name_func``.
+    ``conversation.alias``); they can be replaced with ``is_mediator`` and ``name_func``.
+
+    Reference: CIG: Measuring Conversational Information Gain in Deliberative Dialogues with
+    Semantic Memory Dynamics, https://aclanthology.org/2026.acl-long.2203/
 
     :param llm_client: client with a ``generate_json(prompt)`` method; by default a
         GPT5Client for ``model`` in JSON mode with a fixed ``seed``
@@ -176,19 +193,22 @@ class ClaimTracker(Transformer):
     :param nli: a sentence_transformers CrossEncoder whose label 1 is entailment, used to collapse
         near-paraphrases extracted from one utterance (default: ``nli_model``)
     :param nli_model: name of the NLI model to load if ``nli`` is not given
-    :param device: torch device for the default embedder and NLI model
-    :param top_k: nearest claims of each other speaker shown to the consolidator
-    :param own_cap: cap on the speaker's own claims shown to the consolidator
-    :param context_window: preceding utterances shown to the extractor
-    :param sibling_entail: mutual entailment probability from which two claims extracted from one
-        utterance count as the same claim
+    :param device: torch device for the default embedder and NLI model (default: ``"mps"`` if
+        available, else ``"cpu"``)
+    :param top_k: number of nearest claims of each other speaker shown to the consolidation LLM
+    :param own_cap: if the speaker has more active claims than this, only roughly this many of
+        the nearest ones are shown to the consolidation LLM
+    :param context_window: number of preceding utterances shown to the extraction LLM
+    :param sibling_entail: mutual entailment probability from which two claims extracted from
+        one utterance count as the same claim
     :param is_mediator: function from Speaker to whether it is the mediator
     :param name_func: function from (Conversation, Speaker) to the name used for a participant
     :param topic_func: function from Conversation to the topic line shown to the model
-    :param seed_text_func: function from (Conversation, Speaker) to the text a participant's memory
-        is seeded from; by default ``conversation.meta["pre_survey"][speaker.id]``. None for no seed
-    :param custom_prompts: dict replacing any of the prompt files: "extraction", "consolidation",
-        "agreement"
+    :param seed_text_func: function from (Conversation, Speaker) to the text a participant's
+        memory is seeded from (by default ``conversation.meta["pre_survey"][speaker.id]``), or
+        None for no seeding
+    :param custom_prompts: dict replacing any of the prompt files, with keys ``"extraction"``,
+        ``"consolidation"`` and ``"agreement"``
     :param claims_attribute_name: name of the conversation metadata attribute to store results in
     :param n_workers: number of conversations to track concurrently
     :param verbosity: print progress every ``verbosity`` conversations (0 to disable)
@@ -273,13 +293,16 @@ class ClaimTracker(Transformer):
     # -- model calls -------------------------------------------------------
 
     def _chat_json(self, prompt: str):
+        """Send a prompt to the LLM and return its parsed JSON reply."""
         return self.llm_client.generate_json(prompt)
 
     def _embed(self, texts: List[str]):
+        """Unit-length embeddings of the texts, as lists."""
         with self._model_lock:
             return self.embedder.encode(list(texts), normalize_embeddings=True).tolist()
 
     def _same_claim(self, a: str, b: str) -> bool:
+        """Whether two claims entail each other in both directions under the NLI model."""
         with self._model_lock:
             p = self.nli.predict([(a, b), (b, a)], apply_softmax=True)[:, 1]
         return float(min(p)) >= self.sibling_entail
@@ -290,9 +313,16 @@ class ClaimTracker(Transformer):
         self, context: str, target: str, speaker: str, turn
     ) -> List[dict]:
         """
-        Extract the atomic claims of one utterance, with near-paraphrases collapsed into one claim
-        (the others are kept as its ``siblings``). The speaker is taken from the transcript, not
-        from the model.
+        Extract the atomic claims of one utterance with the LLM, with near-paraphrases collapsed
+        into one claim (the others are kept as its ``siblings``). The speaker is taken from the
+        transcript, not from the LLM.
+
+        :param context: the preceding utterances (or the topic line), as text
+        :param target: the utterance to extract claims from, as a transcript line
+        :param speaker: the name of the utterance's speaker
+        :param turn: the utterance's position in the conversation, or ``"pre-survey"``
+        :return: list of claim dicts with ``speaker``, ``target_speaker``, ``claim``, ``kind``,
+            ``about``, ``turn_id`` and ``siblings``
         """
         prompt = (
             f"{self.prompts['extraction']}\n\n### Task\n\n**Context**\n{context}\n\n"
@@ -315,6 +345,13 @@ class ClaimTracker(Transformer):
         return self.collapse_siblings(claims)
 
     def collapse_siblings(self, claims: List[dict]) -> List[dict]:
+        """
+        Collapse claims of the same kind that entail each other (see ``sibling_entail``) into
+        the first of them, keeping the texts of the others in its ``siblings``.
+
+        :param claims: claims extracted from one utterance
+        :return: the remaining claims, each with a ``siblings`` list
+        """
         kept = []
         for c in claims:
             twin = next(
@@ -336,6 +373,14 @@ class ClaimTracker(Transformer):
 
     @staticmethod
     def new_entry(memory: List[dict], claim: dict, turn) -> dict:
+        """
+        Create a memory entry for a claim (without adding it to the memory).
+
+        :param memory: the current memory, used to number the entry
+        :param claim: the claim dict
+        :param turn: the turn at which the claim was made
+        :return: the new entry
+        """
         turn = str(turn)
         return {
             "id": f"c_{len(memory)}",
@@ -369,6 +414,13 @@ class ClaimTracker(Transformer):
 
     @staticmethod
     def active(memory: List[dict], speaker: Optional[str] = None) -> List[dict]:
+        """
+        Get the active (not retracted) entries of the memory.
+
+        :param memory: the memory
+        :param speaker: if given, only this speaker's entries are returned
+        :return: list of active entries
+        """
         return [
             m
             for m in memory
@@ -379,10 +431,18 @@ class ClaimTracker(Transformer):
     def held_entries(
         cls, memory: List[dict], speaker: str, kinds=("own",)
     ) -> List[dict]:
-        """The claims a speaker holds: their active entries of the given kinds."""
+        """
+        Get the claims a speaker holds: their active entries of the given kinds.
+
+        :param memory: the memory
+        :param speaker: the speaker's name
+        :param kinds: the claim kinds to include
+        :return: list of entries
+        """
         return [m for m in cls.active(memory, speaker) if m["kind"] in kinds]
 
     def _sync_vectors(self, index: _VectorIndex, entries: List[dict]):
+        """(Re-)embed the given entries in the index."""
         if not entries:
             return
         for m, v in zip(entries, self._embed([m["claim"] for m in entries])):
@@ -396,31 +456,44 @@ class ClaimTracker(Transformer):
         new_claims: List[dict],
     ) -> List[dict]:
         """
-        The speaker's own active claims (all of them, or the nearest ``own_cap``) followed by the
-        ``top_k`` nearest active claims of every other speaker.
+        Retrieve the memory entries shown to the consolidation LLM: the speaker's own active
+        claims (all of them, or about ``own_cap`` of the nearest ones), followed by the ``top_k``
+        nearest active claims of every other speaker, for any of the new claims. Retracted claims
+        are never shown.
+
+        :param index: the embedding index of the memory
+        :param memory: the memory
+        :param speaker: the name of the speaker of the new claims
+        :param new_claims: the claims just extracted
+        :return: list of candidate entries
         """
         by_id = {m["id"]: m for m in memory}
         vecs = self._embed([c["claim"] for c in new_claims])
         own = self.active(memory, speaker)
         if len(own) > self.own_cap:
+            # retracted entries are left out of the search, so they can't take up slots
+            own_ids = {m["id"] for m in own}
             keep = set()
             for v in vecs:
-                keep.update(index.nearest(speaker, v, self.own_cap // len(vecs) + 1))
+                keep.update(index.nearest(speaker, v, self.own_cap // len(vecs) + 1, own_ids))
             own = [m for m in own if m["id"] in keep]
         others = []
         for other in sorted({m["speaker"] for m in memory if m["speaker"] != speaker}):
+            active_ids = {m["id"] for m in self.active(memory, other)}
             ids = set()
             for v in vecs:
-                ids.update(index.nearest(other, v, self.top_k))
-            others += [
-                by_id[i]
-                for i in sorted(ids, key=_entry_index)
-                if by_id[i]["status"] == "active"
-            ]
+                ids.update(index.nearest(other, v, self.top_k, active_ids))
+            others += [by_id[i] for i in sorted(ids, key=_entry_index)]
         return own + others
 
     def consolidate(self, shown: List[dict], new_claims: List[dict]) -> List[dict]:
-        """Ask the model for the relation of each new claim to one of the shown candidates."""
+        """
+        Ask the LLM for the relation of each new claim to one of the shown candidates.
+
+        :param shown: the candidate entries
+        :param new_claims: the claims just extracted
+        :return: the LLM's list of memory updates (unvalidated)
+        """
         shown = [
             {
                 "id": m["id"],
@@ -443,7 +516,15 @@ class ClaimTracker(Transformer):
 
     @staticmethod
     def repair_update(update: dict, shown: Dict[str, dict], speaker: str) -> dict:
-        """Turn one model output into a validated operation (see the module docstring)."""
+        """
+        Turn one LLM output into a validated operation (see the table in the module docstring).
+
+        :param update: one memory update from the LLM
+        :param shown: dict of id -> candidate entry shown to the LLM
+        :param speaker: the name of the speaker of the new claim
+        :return: dict with ``op`` (ADD, RESTATE, REFINE or SUPERSEDE), ``relation``, ``target``
+            (an entry id or None) and, for REFINE, ``text``
+        """
         rel = update.get("logical_relation")
         rel = rel if rel in RELATIONS else "neutral"
         tid = (update.get("target") or {}).get("id")
@@ -471,7 +552,16 @@ class ClaimTracker(Transformer):
         new_claims: List[dict],
         speaker: str,
     ) -> List[dict]:
-        """Pair each new claim with the model's output for it (by text, else by position) and repair."""
+        """
+        Pair each new claim with the LLM's output for it (by claim text, else by position) and
+        turn it into a validated operation.
+
+        :param updates: the LLM's memory updates
+        :param shown: dict of id -> candidate entry shown to the LLM
+        :param new_claims: the claims just extracted
+        :param speaker: the name of the speaker of the new claims
+        :return: list of operations parallel to ``new_claims`` (see ``repair_update``)
+        """
         used, picked = [False] * len(updates), [None] * len(new_claims)
         for i, c in enumerate(new_claims):
             for j, u in enumerate(updates):
@@ -493,7 +583,15 @@ class ClaimTracker(Transformer):
     def apply_updates(
         cls, memory: List[dict], decisions: List[dict], new_claims: List[dict], turn
     ) -> List[dict]:
-        """Write the decisions to the memory; returns the entries whose text changed or were created."""
+        """
+        Apply the operations to the memory, in place.
+
+        :param memory: the memory
+        :param decisions: operations parallel to ``new_claims`` (see ``repair_update``)
+        :param new_claims: the claims just extracted
+        :param turn: the turn at which the claims were made
+        :return: the entries that were created or whose text changed
+        """
         by_id = {m["id"]: m for m in memory}
         changed = []
         turn = str(turn)
@@ -554,6 +652,7 @@ class ClaimTracker(Transformer):
         """
         Build the claim memory of one conversation.
 
+        :param conversation: the Conversation
         :return: dict with ``speakers`` (participant name -> speaker id), ``initial`` and ``final``
             (name -> held claims), ``memory`` (all entries) and ``steps`` (what each utterance
             extracted, was shown, returned and decided)
@@ -561,6 +660,11 @@ class ClaimTracker(Transformer):
         topic = self.topic_func(conversation)
         utts = conversation.get_chronological_utterance_list()
         name_of = display_names(conversation, self.is_mediator, self.name_func)
+        # the memory tells the mediator apart by its name, so a participant can't share it
+        name_of = {
+            sid: f"{name} (participant)" if name == MEDIATOR else name
+            for sid, name in name_of.items()
+        }
         speakers = {sid: conversation.get_speaker(sid) for sid in name_of}
         lines = [
             f"{pos}. {MEDIATOR_LABEL if self.is_mediator(u.speaker) else name_of[u.speaker.id]}: {u.text}"
@@ -645,8 +749,15 @@ class ClaimTracker(Transformer):
         self, claims_a: List[str], claims_b: List[str], name_a: str, name_b: str
     ):
         """
-        Model-judged agree / contradiction pairs between two claim lists, and for each relation
-        the average share of each side's claims that have a counterpart with that relation.
+        Judge with the LLM which claims of two lists agree or contradict each other.
+
+        :param claims_a: the first participant's claims
+        :param claims_b: the second participant's claims
+        :param name_a: the first participant's name
+        :param name_b: the second participant's name
+        :return: dict with ``pairs`` (the judged pairs, by index into each list) and, for
+            ``agree`` and ``contradiction``, the mean over both sides of the share of claims that
+            have a counterpart with that relation (None if either list is empty)
         """
         if not claims_a or not claims_b:
             return {"pairs": [], "agree": None, "contradiction": None}
@@ -682,9 +793,14 @@ class ClaimTracker(Transformer):
 
     def judge_agreement(self, record: dict) -> dict:
         """
-        Agreement between every pair of participants, before (seed claims) and after (held
-        claims) the conversation, plus the means over pairs and the headroom-normalised gain
-        (final - initial) / (1 - initial).
+        Compute the agreement between every pair of participants, before (seed claims) and
+        after (held claims) the conversation.
+
+        :param record: the output of ``track``
+        :return: dict with ``pairs`` (per participant pair, the ``claim_agreement`` results
+            for ``initial`` and ``final``), the means over pairs ``initial``, ``final``,
+            ``contradiction_initial`` and ``contradiction_final``, and ``gain``,
+            (final - initial) / (1 - initial) (None if undefined)
         """
         names = list(record["initial"])
         pairs = [
@@ -722,6 +838,7 @@ class ClaimTracker(Transformer):
 
     @staticmethod
     def _resolve_about(about, names: List[str]) -> Optional[str]:
+        """Match the ``about`` field of a reported claim to a unique participant name, if any."""
         if not isinstance(about, str) or not about.strip():
             return None
         a = about.strip().lower()
@@ -736,8 +853,16 @@ class ClaimTracker(Transformer):
         cls, entry: dict, by_id: Dict[str, dict], names: List[str], seen=frozenset()
     ):
         """
-        Who held a claim first, resolved through its equivalence / entailment links:
-        (speaker name, turn), with the pre-survey as turn -1.
+        Find who held a claim first, following its ``equivalent`` and ``forward_entail`` links.
+
+        A claim the mediator reports on behalf of a participant is attributed to that
+        participant.
+
+        :param entry: the memory entry
+        :param by_id: dict of id -> entry for the whole memory
+        :param names: the participants' names
+        :param seen: ids already visited (to avoid cycles)
+        :return: (speaker name, turn) of the earliest origin, with the pre-survey as turn -1
         """
         who = entry["speaker"]
         if entry["role"] == "mediator" and entry["kind"] == "reported":
@@ -758,8 +883,13 @@ class ClaimTracker(Transformer):
 
     def source_shares(self, record: dict) -> Dict[str, dict]:
         """
-        Per participant: how many of their held claims were first held by the mediator or by a
-        partner, as counts and shares of all held claims.
+        Count, per participant, how many of their held claims were first held by the mediator or
+        by another participant.
+
+        :param record: the output of ``track``
+        :return: dict of participant name -> ``n_final``, ``n_from_mediator``,
+            ``n_from_partner``, ``share_from_mediator`` and ``share_from_partner`` (shares are
+            None if the participant holds no claims)
         """
         names = list(record["initial"])
         by_id = {m["id"]: m for m in record["memory"]}
@@ -780,9 +910,17 @@ class ClaimTracker(Transformer):
 
     def common_ground_shares(self, record: dict, agreement: dict) -> Dict[str, dict]:
         """
-        Per participant: of the claims they share with a partner at the end but not at the start,
-        the share whose earliest origin (over the claim and the partner claims paired with it) is
-        the mediator.
+        Compute, per participant, the share of their newly shared claims that came from the
+        mediator.
+
+        Newly shared claims are those the participant agrees on with a partner at the end but
+        not at the start; a claim counts as coming from the mediator if the earliest origin over
+        the claim and the partner claims paired with it is the mediator.
+
+        :param record: the output of ``track``
+        :param agreement: the output of ``judge_agreement``
+        :return: dict of participant name -> ``n_new_shared`` and ``share_new_common_ground``
+            (None if there are no newly shared claims)
         """
         names = list(record["initial"])
         by_id = {m["id"]: m for m in record["memory"]}
@@ -834,6 +972,7 @@ class ClaimTracker(Transformer):
     # -- transformer -------------------------------------------------------
 
     def _track_and_judge(self, conversation: Conversation) -> dict:
+        """Track one conversation and add the agreement judgments to the record."""
         record = self.track(conversation)
         record["agreement"] = self.judge_agreement(record)
         return record
@@ -844,6 +983,8 @@ class ClaimTracker(Transformer):
         """
         Track the claims of the selected conversations and store the results (see the class
         docstring).
+
+        Conversations whose tracking fails are reported and left without results.
 
         :param corpus: the Corpus to transform
         :param selector: function from Conversation to whether it should be tracked
@@ -888,13 +1029,14 @@ class ClaimTracker(Transformer):
         self, corpus: Corpus, selector: Callable[[Conversation], bool] = lambda c: True
     ) -> pd.DataFrame:
         """
-        The per-participant results in one table.
+        Collect the per-participant results in one table.
 
         :param corpus: a Corpus that has been transformed
         :param selector: function from Conversation to whether it should be included
-        :return: DataFrame with one row per (conversation, participant): ``n_initial``,
-            ``n_final``, ``agreement_gain`` (the conversation's), ``share_from_mediator``,
-            ``share_from_partner``, ``share_new_common_ground``
+        :return: DataFrame with one row per (conversation, participant) and columns
+            ``conversation_id``, ``speaker`` (the speaker id), ``n_initial``, ``n_final``,
+            ``agreement_gain`` (the conversation's), ``share_from_mediator``,
+            ``share_from_partner`` and ``share_new_common_ground``
         """
         rows = []
         for convo in corpus.iter_conversations():

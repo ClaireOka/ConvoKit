@@ -1,10 +1,13 @@
 """
 ConvoKit AI: ConvoKit's data model extended with AI speakers, private assistants, and support messages.
 
-Mirrors the convokit.model API, so it can be used as a drop-in replacement::
+Mirrors the ``convokit.model`` API, so it can be used as a drop-in replacement::
 
     import convokitai
     corpus = convokitai.Corpus.load("path/to/corpus")   # or convokitai.Corpus(filename=...)
+
+Corpora dumped by ``convokitai`` remain valid ConvoKit corpora: the AI fields are stored in the
+regular metadata (see :mod:`convokitai.aiUtil`).
 """
 
 from convokit.model import ConvoKitIndex, ConvoKitMatrix, ConvoKitMeta, CorpusComponent, UtteranceNode

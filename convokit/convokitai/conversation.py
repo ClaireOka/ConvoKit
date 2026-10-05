@@ -1,3 +1,7 @@
+"""
+The ConvoKit AI Conversation class, with private assistants and their support messages.
+"""
+
 from collections import defaultdict
 from typing import Dict, List, Optional
 
@@ -12,19 +16,23 @@ class Conversation(BaseConversation):
     Represents a discrete subset of utterances in the dataset, connected by a reply-to chain,
     optionally accompanied by AI private assistants and their support messages.
 
-    Takes the same arguments as convokit.Conversation, plus:
+    Takes the same arguments as ``convokit.Conversation``, plus:
 
-    :param ai_meta: metadata for ConvoKitAI. Recognized keys:
+    :param ai_meta: metadata for ConvoKit AI. Recognized keys:
 
-        - "alias": names speakers are referred to in the conversation, keyed by speaker id
-        - "private_assistants": list of PrivateAssistants in this conversation
-        - "supports": list of Supports created from all private assistants in this conversation
+        - ``"alias"``: names speakers are referred to by in the conversation, keyed by speaker id
+        - ``"private_assistants"``: list of PrivateAssistants in this conversation
+        - ``"supports"``: list of Supports from all private assistants in this conversation
 
-    :ivar ai_meta: metadata for ConvoKitAI. Assigning a dict merges it into the existing ai_meta.
+        If ``meta`` contains an ``"ai_meta"`` entry (as in a dumped corpus), it is moved out of
+        ``meta`` and merged with this argument (this argument takes precedence).
+
+    :ivar ai_meta: metadata for ConvoKit AI. Assigning a dict merges it into the existing
+        ``ai_meta``.
     :ivar alias: the speaker id -> alias mapping
     :ivar private_assistants: the PrivateAssistants in this conversation
-    :ivar supports: the Supports in this conversation. If ai_meta has no "supports" entry, these are
-        collected from the conversation's private assistants.
+    :ivar supports: all Supports in this conversation: those in ``ai_meta["supports"]``, those of
+        its private assistants, and those attached to its utterances.
     """
 
     def __init__(
@@ -44,8 +52,8 @@ class Conversation(BaseConversation):
     @classmethod
     def _from_base(cls, convo: BaseConversation) -> "Conversation":
         """
-        Convert a convokit.Conversation into a convokitai Conversation in place, moving AI fields out of its
-        metadata. Metadata deletion must be unlocked by the caller.
+        Convert a ``convokit.Conversation`` into a convokitai Conversation in place, moving AI
+        fields out of its metadata. Metadata deletion must be unlocked by the caller.
         """
         convo.__class__ = cls
         convo._ai_meta = {}
@@ -57,13 +65,14 @@ class Conversation(BaseConversation):
 
     @property
     def ai_meta(self) -> Dict:
+        """The ConvoKit AI metadata of this conversation."""
         return getattr(self, "_ai_meta", {})
 
     @ai_meta.setter
     def ai_meta(self, value):
         if isinstance(value, dict):
             merged = {**as_dict(getattr(self, "_ai_meta", {})), **value}
-            # "assistants" is from earlier iterations of the format
+            # legacy key: older versions of the format stored private assistants under "assistants"
             if "assistants" in merged:
                 legacy = merged.pop("assistants")
                 merged.setdefault("private_assistants", legacy)
@@ -79,6 +88,7 @@ class Conversation(BaseConversation):
 
     @property
     def alias(self) -> Dict[str, str]:
+        """Mapping from speaker id to the alias the speaker is referred to by (a copy)."""
         return as_dict(self.ai_meta.get("alias"))
 
     @alias.setter
@@ -87,6 +97,7 @@ class Conversation(BaseConversation):
 
     @property
     def private_assistants(self) -> List[PrivateAssistant]:
+        """The PrivateAssistants in this conversation (a new list; assign to modify)."""
         return list(self.ai_meta.get("private_assistants", []))
 
     @private_assistants.setter
@@ -95,7 +106,11 @@ class Conversation(BaseConversation):
 
     def get_private_assistant(self, assistant_id: str) -> PrivateAssistant:
         """
-        Get the PrivateAssistant with the specified id. Raises a KeyError if there is no such private assistant.
+        Get the PrivateAssistant with the specified id.
+
+        :param assistant_id: id of the private assistant
+        :return: the PrivateAssistant
+        :raises KeyError: if there is no private assistant with that id in this conversation
         """
         for assistant in self.private_assistants:
             if assistant.id == assistant_id:
@@ -104,7 +119,7 @@ class Conversation(BaseConversation):
 
     def get_ai_speakers(self) -> List[str]:
         """
-        Get the ids of the speakers in this conversation that are AI (is_ai is True).
+        Get the ids of the speakers in this conversation that are AI (``is_ai`` is True).
 
         :return: a list of speaker ids (empty if there are no AI speakers)
         """
@@ -114,9 +129,23 @@ class Conversation(BaseConversation):
 
     @property
     def supports(self) -> List[Support]:
-        if "supports" in self.ai_meta:
-            return list(self.ai_meta["supports"])
-        return [support for assistant in self.private_assistants for support in assistant.supports]
+        """
+        All Supports in this conversation (a new list): those in ``ai_meta["supports"]``, those of
+        its private assistants, and those attached to its utterances, each Support once (by id).
+        Assigning sets ``ai_meta["supports"]``.
+        """
+        sources = [
+            self.ai_meta.get("supports", []),
+            *(assistant.supports for assistant in self.private_assistants),
+            *(utt.supports for utt in self.iter_utterances()),
+        ]
+        supports, seen = [], set()
+        for source in sources:
+            for support in source:
+                if support.id not in seen:
+                    seen.add(support.id)
+                    supports.append(support)
+        return supports
 
     @supports.setter
     def supports(self, value):
@@ -124,8 +153,9 @@ class Conversation(BaseConversation):
 
     def __transcript_entries(self, supports: bool) -> List:
         """
-        The Utterances of the conversation ordered by timestamp, with (if `supports` is True) each Support
-        right after the utterance it replies to (Supports without a reply_to in this conversation come first).
+        Return the Utterances ordered by timestamp, with (if ``supports`` is True) each Support
+        right after the utterance it replies to. Supports without a ``reply_to`` in this
+        conversation come first.
         """
         utterances = sorted(self.iter_utterances(), key=transcript_sort_key)
         if not supports:
@@ -146,15 +176,17 @@ class Conversation(BaseConversation):
 
     def get_transcript(self, supports: bool = False, until=None) -> str:
         """
-        Get a plain-text transcript of the conversation, one utterance per line, ordered by timestamp.
-        Speaker ids are replaced by their aliases, if present.
+        Get a plain-text transcript of the conversation, one utterance per line, ordered by
+        timestamp. Speaker ids are replaced by their aliases, if present.
 
-        :param supports: whether to include Supports. Each Support is shown right after the utterance it
-            replies to (Supports without a reply_to in this conversation are shown first), labeled with
-            the speakers that can see it.
-        :param until: an Utterance or Support of this conversation; if given, the transcript ends with it
-            (inclusive). A Support given here is always shown, even if `supports` is False.
+        :param supports: whether to include Supports. Each Support is shown right after the
+            utterance it replies to (Supports without a ``reply_to`` in this conversation are shown
+            first), labeled with the speakers that can see it.
+        :param until: an Utterance or Support of this conversation; if given, the transcript ends
+            with it (inclusive). A Support given here is always shown, even if ``supports`` is
+            False.
         :return: the transcript as a single string
+        :raises ValueError: if ``until`` is not in this conversation
         """
         entries = self.__transcript_entries(supports or isinstance(until, Support))
         if isinstance(until, Support) and not supports:

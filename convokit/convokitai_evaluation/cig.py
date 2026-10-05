@@ -1,16 +1,17 @@
 """
-Conversational Information Gain (CIG): a 1-4 score for each utterance saying how much it added
-to what the group already knew (1 = nothing new, 4 = a new idea or reframing).
+Conversational Information Gain (CIG): a 1-4 score for each utterance indicating how much it
+added to what the group already knew (1 = nothing new, 4 = a new idea or reframing).
 
 An LLM reads the whole conversation once and rates every utterance against what came before it.
 Two kinds of utterances are left unrated (score ``None``):
 
-- the opening exchange, up to and including the first message by which every speaker has spoken
-  once: there is nothing before it to add to, so it is shown to the judge as context only;
-- fragments: 3 words or fewer, or 4-5 words without a final ``.``, ``!`` or ``?`` ("ok!",
-  "yeah that makes sense").
+- the opening exchange, up to and including the first utterance by which every speaker has
+  spoken at least once: there is nothing before it to add to, so it is shown to the LLM as
+  context only;
+- fragments: 3 words or fewer, or 4-5 words without a final ``.``, ``!`` or ``?`` (e.g.
+  "ok!", "yeah that makes sense").
 
-Reference paper: CIG: Measuring Conversational Information Gain in Deliberative Dialogues with
+Reference: CIG: Measuring Conversational Information Gain in Deliberative Dialogues with
 Semantic Memory Dynamics, https://aclanthology.org/2026.acl-long.2203/
 """
 
@@ -37,8 +38,11 @@ MEDIATOR_LABEL = "Mediator(mod)"
 
 def is_fragment(text: str) -> bool:
     """
-    Whether an utterance is too short to rate: at most 3 words, or at most 5 words without
-    terminal punctuation.
+    Check whether an utterance is too short to rate: at most 3 words, or at most 5 words without
+    terminal punctuation (``.``, ``!`` or ``?``).
+
+    :param text: the utterance text
+    :return: True if the utterance is a fragment
     """
     words = str(text).split()
     return len(words) <= 3 or (
@@ -48,8 +52,14 @@ def is_fragment(text: str) -> bool:
 
 class CIG(Transformer):
     """
-    Rates every utterance of a conversation for conversational information gain (see the module
-    docstring) and stores the rating in ``utt.meta["cig"]`` (``None`` where not rated).
+    ConvoKit Transformer that rates every utterance of a conversation for conversational
+    information gain (CIG) with an LLM, and stores the rating in ``utt.meta["cig"]`` (``None``
+    where not rated).
+
+    Each utterance gets a score from 1 (adds nothing new) to 4 (a new idea or reframing). The
+    opening exchange (up to and including the first utterance by which every speaker has
+    spoken) is shown to the LLM as context only, and fragments (see ``is_fragment``) are not
+    rated.
 
     Usage::
 
@@ -57,9 +67,12 @@ class CIG(Transformer):
         cig.transform(corpus)
         cig.summarize(corpus)   # mean score per conversation, mediator vs participants
 
-    The corpus must say who the mediator is and what each speaker is called in the chat; by
+    The corpus must identify the mediator and the name each speaker goes by in the chat. By
     default these come from the ConvoKit AI fields (``speaker.ai_meta["role"]`` and
-    ``conversation.alias``), and can be replaced with ``is_mediator`` / ``name_func``.
+    ``conversation.alias``); they can be replaced with ``is_mediator`` and ``name_func``.
+
+    Reference: CIG: Measuring Conversational Information Gain in Deliberative Dialogues with
+    Semantic Memory Dynamics, https://aclanthology.org/2026.acl-long.2203/
 
     :param llm_client: client with a ``generate_json(prompt)`` method; by default a
         GPT5Client for ``model`` with ``reasoning_effort``
@@ -69,7 +82,8 @@ class CIG(Transformer):
     :param custom_prompt: prompt template replacing ``prompts/cig_prompt.txt``; must contain the
         ``{topic}``, ``{context}``, ``{target}``, ``{start}``, ``{end}`` and ``{total}`` placeholders
     :param cig_attribute_name: name of the utterance metadata attribute to store the rating in
-    :param is_mediator: function from Speaker to whether it is the mediator (shown as "Mediator(mod)")
+    :param is_mediator: function from Speaker to whether it is the mediator (shown to the LLM as
+        ``Mediator(mod)``)
     :param name_func: function from (Conversation, Speaker) to the name shown for a participant
     :param topic_func: function from Conversation to the topic line shown to the model
     :param n_workers: number of conversations to rate concurrently
@@ -115,11 +129,15 @@ class CIG(Transformer):
 
     def rating_targets(self, utts: List[Utterance]) -> Tuple[List[bool], List[bool]]:
         """
-        Split a conversation's utterances (in order) into the opening context batch and the rating
-        targets.
+        Split a conversation's utterances into the opening context batch and the rating targets.
 
-        :return: two lists parallel to ``utts``: in_context_batch, is_target
+        :param utts: the conversation's utterances, in chronological order
+        :return: two lists of booleans parallel to ``utts``: whether each utterance is in the
+            opening context batch, and whether it is to be rated (both empty if there are no
+            utterances)
         """
+        if not utts:
+            return [], []
         seen, n_seen = set(), []
         for utt in utts:
             seen.add(utt.speaker.id)
@@ -137,8 +155,9 @@ class CIG(Transformer):
         """
         Build the rating prompt for a conversation.
 
-        :return: the prompt (None if the conversation has nothing to rate) and the positions of the
-            target utterances in chronological order
+        :param conversation: the Conversation to rate
+        :return: the prompt (None if the conversation has nothing to rate) and the positions of
+            the utterances to rate, in chronological order
         """
         utts = conversation.get_chronological_utterance_list()
         names = display_names(conversation, self.is_mediator, self.name_func)
@@ -176,6 +195,7 @@ class CIG(Transformer):
         return prompt, targets
 
     def _rate(self, conversation: Conversation) -> Tuple[str, Dict[int, int]]:
+        """Rate one conversation; returns its id and a dict of utterance position -> rating."""
         prompt, targets = self.build_prompt(conversation)
         if prompt is None:
             return conversation.id, {}
@@ -190,6 +210,8 @@ class CIG(Transformer):
         """
         Rate the utterances of the selected conversations and store each rating in
         ``utt.meta[cig_attribute_name]`` (``None`` for utterances that are not rated).
+
+        Conversations whose rating fails are reported and left with ``None`` ratings.
 
         :param corpus: the Corpus to transform
         :param selector: function from Conversation to whether it should be rated
@@ -222,15 +244,16 @@ class CIG(Transformer):
         min_mediator_utts: int = 2,
     ) -> pd.DataFrame:
         """
-        Mean rating of the mediator's utterances and of the participants' utterances, per
-        conversation.
+        Compute the mean rating of the mediator's utterances and of the participants' utterances,
+        per conversation.
 
         :param corpus: a Corpus that has been transformed
         :param selector: function from Conversation to whether it should be included
         :param speaker_selector: function from Speaker to whether its utterances count
-        :param min_mediator_utts: skip conversations where the mediator spoke fewer times than this
-            (0 to keep all; conversations without a mediator are kept)
-        :return: DataFrame with one row per (conversation, is_mediator): ``n_rated``, ``cig_mean``
+        :param min_mediator_utts: skip conversations where the mediator spoke fewer times than
+            this (0 to keep all; conversations without a mediator are kept)
+        :return: DataFrame with one row per (conversation, is_mediator) and columns
+            ``conversation_id``, ``is_mediator``, ``n_rated`` and ``cig_mean``
         """
         rows = []
         for convo in corpus.iter_conversations():

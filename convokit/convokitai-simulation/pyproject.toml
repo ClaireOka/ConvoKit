@@ -1,7 +1,9 @@
+# Install with:
+#   pip install "git+https://github.com/CornellNLP/ConvoKit.git@master#subdirectory=convokit/convokitai-simulation"
 [project]
 name = "dl-sim"
 version = "0.1.0"
-description = "Run Deliberate Lab agent simulations against the backend container"
+description = "Run AI agent conversation simulations on a Deliberate Lab backend and load them as convokitai corpora"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
@@ -11,7 +13,8 @@ dependencies = [
     "udocker",
     "pyyaml",
     "tqdm",
-    # also needs convokitai, installed with convokit from this repository (see convokit/convokitai/pyproject.toml)
+    # also requires convokitai, which is installed with ConvoKit from this repository
+    # (see convokit/convokitai/pyproject.toml)
 ]
 
 [build-system]

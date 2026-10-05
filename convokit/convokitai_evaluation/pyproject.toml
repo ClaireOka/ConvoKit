@@ -1,12 +1,13 @@
 # Install for local development (from the repository root):
 #   python -m pip install -e ./convokit/convokitai -e ./convokit/convokitai_evaluation
 # Install from GitHub:
-#   pip install "git+https://github.com/ClaireOka/ConvoKit.git@master#subdirectory=convokit/convokitai_evaluation"
+#   pip install "git+https://github.com/CornellNLP/ConvoKit.git@master#subdirectory=convokit/convokitai"
+#   pip install "git+https://github.com/CornellNLP/ConvoKit.git@master#subdirectory=convokit/convokitai_evaluation"
 
 [project]
 name = "convokitai-evaluation"
 version = "0.1.0"
-description = "Evaluation metrics for mediated multi-party conversations: CIG, claim consensus, mediator redirection"
+description = "Evaluation metrics for AI-mediated multi-party conversations: conversational information gain (CIG), claim-level consensus, and mediator redirection"
 requires-python = ">=3.12"
 dependencies = [
     "convokit>=4.1",

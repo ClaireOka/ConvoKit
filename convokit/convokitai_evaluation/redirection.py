@@ -8,17 +8,19 @@ redirection score is the log-odds difference: positive means the reply was more 
 T_k than after the stand-in, i.e. the turn steered the conversation; near zero means the reply
 would have come anyway.
 
-This is convokit.redirection (Nguyen et al. 2024) with context selectors for a mediator and
-several participants instead of two alternating speakers:
+This is ``convokit.redirection`` (Nguyen et al., 2024) with context selectors for one mediator
+and several participants instead of two alternating speakers::
 
     actual     [participant turn before T_k, T_k]      -> reply
     reference  [participant turn before T_k, T_(k-1)]  -> same reply   (counterfactual "prev")
                [participant turn before T_k]           -> same reply   (counterfactual "delete")
 
-Each line is prefixed with the speaker's name ("Goose: ..."), the name the mediator uses.
+Each participant line is prefixed with the participant's name in the chat (e.g. "Goose: ..."),
+the same name the mediator uses to address them; mediator lines are prefixed with
+"mediator: ".
 
-Reference paper: Taking a turn for the better: Conversation redirection throughout the course of mental-health therapy
-https://aclanthology.org/2024.findings-emnlp.555/
+Reference: Taking a turn for the better: Conversation redirection throughout the course of
+mental-health therapy, https://aclanthology.org/2024.findings-emnlp.555/
 """
 
 from typing import Callable, Dict, List, Tuple
@@ -37,8 +39,11 @@ COUNTERFACTUALS = ("prev", "delete")
 
 def mediator_speaker_prefixes(roles: List[str]) -> Dict[str, str]:
     """
-    Speaker prefixes that use each role name itself ("Goose: "), so the prefix matches the name the
-    mediator says.
+    Build speaker prefixes that use each role name itself (e.g. "Goose: "), so that a
+    participant's prefix matches the name the mediator addresses them by.
+
+    :param roles: the role names in a conversation
+    :return: dict of role name -> prefix
     """
     return {role: role + ": " for role in roles}
 
@@ -49,15 +54,20 @@ def mediator_previous_context_selector(
     role_attribute_name: str = "role",
 ) -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]:
     """
-    Actual and reference contexts for every mediator turn that has a participant turn before it
-    and a previous mediator turn. Mediator turns directly following another mediator turn are
-    skipped.
+    Compute the actual and reference contexts of the mediator turns, for use as the
+    ``previous_context_selector`` of ``convokit.redirection.Redirection``.
 
-    :param convo: Conversation whose utterances carry ``meta[role_attribute_name]``
-    :param counterfactual: "prev" replaces the mediator turn with its previous turn in the
-        reference context; "delete" removes it
+    A context is computed for every mediator turn that has a participant turn before it and,
+    with the ``"prev"`` counterfactual, an earlier mediator turn to stand in for it. Mediator
+    turns directly following another mediator turn are skipped.
+
+    :param convo: Conversation whose utterances carry ``meta[role_attribute_name]``, with the
+        value ``"mediator"`` for the mediator
+    :param counterfactual: ``"prev"`` replaces the mediator turn with the mediator's previous
+        turn in the reference context; ``"delete"`` removes it
     :param role_attribute_name: utterance metadata attribute holding the role
     :return: dicts of utterance id -> actual context and utterance id -> reference context
+    :raises ValueError: if ``counterfactual`` is not ``"prev"`` or ``"delete"``
     """
     if counterfactual not in COUNTERFACTUALS:
         raise ValueError(
@@ -77,14 +87,16 @@ def mediator_previous_context_selector(
             continue
 
         adjacent = i > 0 and utts[i - 1].meta[role_attribute_name] == MEDIATOR_LABEL
-        if prev_participant is not None and prev_mediator is not None and not adjacent:
+        # only the "prev" counterfactual needs an earlier mediator turn to stand in for this one
+        has_reference = counterfactual == "delete" or prev_mediator is not None
+        if prev_participant is not None and has_reference and not adjacent:
             prev_data = role_to_prefix[prev_participant.meta[role_attribute_name]]
             prev_data += prev_participant.text
             cur_data = role_to_prefix[MEDIATOR_LABEL] + utt.text
-            ref_data = role_to_prefix[MEDIATOR_LABEL] + prev_mediator.text
 
             actual_contexts[utt.id] = [prev_data, cur_data]
             if counterfactual == "prev":
+                ref_data = role_to_prefix[MEDIATOR_LABEL] + prev_mediator.text
                 reference_contexts[utt.id] = [prev_data, ref_data]
             else:
                 reference_contexts[utt.id] = [prev_data]
@@ -98,8 +110,11 @@ def mediator_future_context_selector(
     convo: Conversation, role_attribute_name: str = "role"
 ) -> Dict[str, List[str]]:
     """
-    Future context for every mediator turn: the participant turn right after it (none if the next
-    turn is the mediator's again or empty).
+    Compute the future context of every mediator turn: the participant turn right after it, for
+    use as the ``future_context_selector`` of ``convokit.redirection.Redirection``.
+
+    Mediator turns followed by another mediator turn, by an empty utterance, or by nothing get
+    no future context.
 
     :param convo: Conversation whose utterances carry ``meta[role_attribute_name]``
     :param role_attribute_name: utterance metadata attribute holding the role
@@ -125,9 +140,16 @@ def mediator_future_context_selector(
 
 class MediatorRedirection(Transformer):
     """
-    Scores each mediator turn by how much it redirected the participant reply that followed it
-    (see the module docstring) and stores the score in ``utt.meta["redirection"]``. Mediator
-    turns with no participant reply, or no participant turn before them, get no score.
+    ConvoKit Transformer that scores each mediator turn by how much it redirected the
+    participant reply that followed it, and stores the score in ``utt.meta["redirection"]``.
+
+    The score compares how likely a language model finds the participant reply after the
+    mediator turn versus after a counterfactual context (the mediator's previous turn, or no
+    mediator turn), as a log-odds difference: positive values mean the turn made the reply more
+    expected. A mediator turn is scored only if it is followed by a participant reply, has a
+    participant turn before it, does not directly follow another mediator turn, and (with the
+    ``"prev"`` counterfactual) has an earlier mediator turn to compare against (see
+    ``mediator_previous_context_selector``).
 
     Usage::
 
@@ -136,17 +158,21 @@ class MediatorRedirection(Transformer):
         redirection.transform(corpus)
         redirection.summarize(corpus)   # mean score per conversation
 
-    It also writes ``utt.meta["role"]`` ("mediator", or the participant's name), the attribute
-    convokit.redirection reads. ``fit`` fine-tunes the likelihood model (with
-    convokit.redirection's own "Speaker A/B" formatting); scoring works without it.
+    It also writes ``utt.meta["role"]`` (``"mediator"``, or the participant's name), the
+    attribute ``convokit.redirection`` reads. ``fit`` fine-tunes the likelihood model (with
+    ``convokit.redirection``'s own "Speaker A/B" formatting); scoring works without it.
 
-    The corpus must say who the mediator is and what each speaker is called in the chat; by
+    The corpus must identify the mediator and the name each speaker goes by in the chat. By
     default these come from the ConvoKit AI fields (``speaker.ai_meta["role"]`` and
-    ``conversation.alias``), and can be replaced with ``is_mediator`` / ``name_func``.
+    ``conversation.alias``); they can be replaced with ``is_mediator`` and ``name_func``.
 
-    :param likelihood_model: a convokit.redirection LikelihoodModel (e.g. GemmaLikelihoodModel);
-        scores can be computed with the off-the-shelf model, ``fit`` fine-tunes it
-    :param counterfactual: "prev" or "delete" (see mediator_previous_context_selector)
+    Reference: Taking a turn for the better: Conversation redirection throughout the course of
+    mental-health therapy, https://aclanthology.org/2024.findings-emnlp.555/
+
+    :param likelihood_model: a ``convokit.redirection`` LikelihoodModel (e.g.
+        GemmaLikelihoodModel); scores can be computed with the off-the-shelf model, and ``fit``
+        fine-tunes it
+    :param counterfactual: ``"prev"`` or ``"delete"`` (see ``mediator_previous_context_selector``)
     :param is_mediator: function from Speaker to whether it is the mediator
     :param name_func: function from (Conversation, Speaker) to a participant's speaker prefix
     :param redirection_attribute_name: name of the utterance metadata attribute to store scores in
@@ -175,17 +201,25 @@ class MediatorRedirection(Transformer):
 
     def label_roles(self, corpus: Corpus, selector: Callable[[Conversation], bool]):
         """
-        Write each utterance's role into ``meta["role"]`` in the selected conversations.
+        Write each utterance's role into ``utt.meta["role"]`` in the selected conversations:
+        ``"mediator"`` for the mediator, otherwise the participant's name from ``name_func``
+        (with " (participant)" appended if that name is itself ``"mediator"``).
+
+        :param corpus: the Corpus to label
+        :param selector: function from Conversation to whether it should be labeled
         """
         for convo in corpus.iter_conversations():
             if not selector(convo):
                 continue
             for utt in convo.iter_utterances():
-                utt.meta[ROLE_ATTRIBUTE_NAME] = (
-                    MEDIATOR_LABEL
-                    if self.is_mediator(utt.speaker)
-                    else self.name_func(convo, utt.speaker)
-                )
+                if self.is_mediator(utt.speaker):
+                    role = MEDIATOR_LABEL
+                else:
+                    # roles tell the mediator apart by its label, so a participant can't share it
+                    role = self.name_func(convo, utt.speaker)
+                    if role == MEDIATOR_LABEL:
+                        role += " (participant)"
+                utt.meta[ROLE_ATTRIBUTE_NAME] = role
 
     def fit(
         self,
@@ -195,7 +229,14 @@ class MediatorRedirection(Transformer):
         val_selector: Callable[[Conversation], bool] = lambda convo: True,
     ):
         """
-        Fine-tune the likelihood model on the selected conversations (see Redirection.fit).
+        Fine-tune the likelihood model on the selected conversations (see
+        ``convokit.redirection.Redirection.fit``).
+
+        :param corpus: the Corpus to train on
+        :param y: unused; accepted for compatibility with the Transformer interface
+        :param train_selector: function from Conversation to whether it is used for training
+        :param val_selector: function from Conversation to whether it is used for validation
+        :return: this MediatorRedirection
         """
         self.label_roles(corpus, train_selector)
         self.label_roles(corpus, val_selector)
@@ -211,7 +252,7 @@ class MediatorRedirection(Transformer):
         verbosity: int = 5,
     ):
         """
-        Label roles and store the redirection score of each scoreable mediator turn in
+        Label roles and store the redirection score of each scorable mediator turn in
         ``utt.meta[redirection_attribute_name]``.
 
         :param corpus: the Corpus to transform
@@ -229,11 +270,12 @@ class MediatorRedirection(Transformer):
         selector: Callable[[Conversation], bool] = lambda convo: True,
     ) -> pd.DataFrame:
         """
-        Mean redirection per conversation.
+        Compute the mean redirection score per conversation.
 
         :param corpus: a Corpus that has been transformed
         :param selector: function from Conversation to whether it should be included
-        :return: DataFrame with one row per conversation: ``n_scored``, ``redirection_mean``
+        :return: DataFrame with one row per conversation that has at least one score, and
+            columns ``conversation_id``, ``n_scored`` and ``redirection_mean``
         """
         rows = []
         for convo in corpus.iter_conversations():

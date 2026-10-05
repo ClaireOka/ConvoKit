@@ -1,15 +1,20 @@
-"""
-local_backend.py — run the Deliberate Lab TypeScript backend from Python.
+"""Run the Deliberate Lab TypeScript backend locally from Python.
 
-`LocalBackend` supervises the Firebase emulator suite (a Node/Java process
-tree) as an explicit, scoped service dependency, and mints an API key so the
-`deliberate_lab` Python client can talk to it.
+:class:`LocalBackend` runs the Firebase emulator suite of a Deliberate Lab
+(https://github.com/PAIR-code/deliberate-lab) checkout, a tree of Node and Java
+processes, as an explicitly scoped service, and mints an API key so that the
+``deliberate_lab`` Python client can talk to it. It can also attach to emulators
+that are already running, such as those in the container started by
+:class:`dl_container.BackendContainer`.
 
-Context-manager only, by design. There is no autostart in ``__init__``, no
-``__del__`` hook and no ``weakref.finalize``: object lifetime is a poor proxy
-for "how long do I need this service", and tying a process tree to the garbage
-collector strands ports when a reference drops early. ``atexit`` is registered
-purely as a backstop for the case where a script dies without unwinding.
+``LocalBackend`` must be used as a context manager. By design, there is no
+autostart in ``__init__``, no ``__del__`` hook and no ``weakref.finalize``:
+object lifetime is a poor proxy for how long the service is needed, and tying a
+process tree to the garbage collector leaves ports bound when a reference is
+dropped early. An ``atexit`` handler is registered only as a backstop for a
+script that dies without unwinding.
+
+Example::
 
     from local_backend import LocalBackend
 
@@ -18,15 +23,22 @@ purely as a backstop for the case where a script dies without unwinding.
         print(client.health_check())
         result = client.create_experiment(name="Smoke test")
 
-Requirements: Python 3.12+, Node with `npx`, a `npm ci`-installed and built
-checkout (`npm run build:utils && npm run build:functions`), and Java for the
-Firestore/Auth emulators. Only the standard library is used here; the
-`deliberate_lab` client itself is imported lazily by `client()`.
+Requirements for starting the emulators (not for attaching to running ones):
+Python 3.12+, Node with ``npx``, a Deliberate Lab checkout installed with
+``npm ci`` and built with ``npm run build:utils && npm run build:functions``,
+and Java for the Firestore and Auth emulators. This module only uses the
+standard library; the ``deliberate_lab`` client is imported lazily by
+:meth:`LocalBackend.client`.
 
-Note that the emulator ports are hardcoded in the repo's firebase.json, so at
-most one backend can run per machine. This class refuses to start when a port
-is already bound unless `reuse_running=True`, in which case it attaches and
-never kills a process it did not spawn.
+The emulator ports are fixed in the checkout's ``firebase.json``, so at most
+one backend can run per machine. ``LocalBackend`` refuses to start when a port
+is already in use unless ``reuse_running=True``, in which case it attaches to
+the running emulators and never kills a process it did not start.
+
+Running this module as a script (``python local_backend.py [repo_root]``)
+starts the emulators of the checkout at ``repo_root`` (default: the current
+directory), prints a health check and the number of experiments, and exports
+the emulator data to ``emulator_test_config_local`` on exit.
 """
 
 from __future__ import annotations
@@ -54,10 +66,10 @@ __all__ = ["LocalBackend", "LocalBackendError"]
 
 _IS_WINDOWS = sys.platform == "win32"
 
-# Must match functions/src/dl_api/dl_api_key.utils.ts, which calls Node's
-# crypto.scrypt with its default cost parameters and passes the salt as a hex
-# *string* (so the UTF-8 bytes of the hex digits are the salt, not the decoded
-# bytes). Verified byte-for-byte against Node.
+# Must match Deliberate Lab's functions/src/dl_api/dl_api_key.utils.ts, which
+# calls Node's crypto.scrypt with its default cost parameters and passes the
+# salt as a hex *string* (so the salt is the UTF-8 bytes of the hex digits, not
+# the decoded bytes). Verified byte-for-byte against Node.
 _SCRYPT_N = 16384
 _SCRYPT_R = 8
 _SCRYPT_P = 1
@@ -70,8 +82,50 @@ class LocalBackendError(RuntimeError):
 
 
 class LocalBackend:
-    """Supervises the Deliberate Lab Firebase emulators for the duration of a
-    ``with`` block and exposes the base URL and API key a client needs."""
+    """Runs the Deliberate Lab Firebase emulators for the duration of a ``with`` block.
+
+    Inside the block, :attr:`base_url` and :attr:`api_key` give what a
+    ``deliberate_lab`` client needs, and :meth:`client` builds one. Each
+    instance can be used for only one ``with`` block.
+
+    :param repo_root: Deliberate Lab checkout containing ``firebase.json``.
+        Unused when attaching with ``reuse_running=True``.
+    :param project_id: Firebase project ID, passed explicitly as ``--project``
+        so that the URL path and the emulator always agree. (The checkout's
+        ``.firebaserc.example`` uses ``demo-project-id``, while the Python
+        client's built-in development URL uses ``demo-deliberate-lab``.)
+    :param experimenter_email: experimenter account the minted API key belongs
+        to. The web UI only lists experiments whose creator is the signed-in
+        experimenter, so set this to the account you sign in with to see
+        experiments created through the API. The account seeded by
+        ``emulator_test_config`` is ``experimenter@google.com``.
+    :param emulators: which emulators to start. The REST API needs
+        ``functions`` and ``firestore``; ``auth`` is needed only for the web UI.
+    :param import_dir: emulator data to load with ``--import``, relative to
+        ``repo_root``. Pass None to start from an empty state.
+    :param export_on_exit: directory to save emulator data to with
+        ``--export-on-exit``, relative to ``repo_root``, so that minted keys and
+        created experiments survive a restart.
+    :param region: Cloud Functions region in the functions URL.
+    :param functions_port: port of the functions emulator.
+    :param firestore_port: port of the Firestore emulator.
+    :param auth_port: port of the Auth emulator.
+    :param api_key: an existing Deliberate Lab API key to use instead of
+        minting one. If not given, ``$DL_API_KEY`` is used, and if that is not
+        set either, a new key is minted.
+    :param startup_timeout: seconds to wait for the emulator ports, and again
+        for the API to answer. Emulator startup is slow; Deliberate Lab's own
+        ``run_locally.sh`` allows 120 seconds per port.
+    :param shutdown_timeout: seconds to wait for the emulators to exit after
+        SIGTERM before killing them.
+    :param log_path: file to write the emulators' output to. Defaults to a temp
+        file; its last lines are included in error messages.
+    :param reuse_running: attach to an already-running emulator suite instead
+        of failing on a port conflict. A process this instance did not start is
+        never killed.
+    :raises LocalBackendError: if ``repo_root`` has no ``firebase.json`` (unless
+        ``reuse_running=True``), or ``emulators`` names an unknown emulator.
+    """
 
     def __init__(
         self,
@@ -92,35 +146,6 @@ class LocalBackend:
         log_path: str | os.PathLike[str] | None = None,
         reuse_running: bool = False,
     ) -> None:
-        """
-        Args:
-            repo_root: Checkout containing firebase.json. Unused when
-                attaching with ``reuse_running=True``.
-            project_id: Passed explicitly as ``--project`` so the URL path and
-                the emulator always agree, sidestepping the mismatch between
-                .firebaserc.example ("demo-project-id") and the DEV_URL baked
-                into the Python client ("demo-deliberate-lab").
-            experimenter_email: Identity the minted key belongs to. Experiments
-                are filtered by ``metadata.creator == experimenterId``, so this
-                must match the account you log into the web UI with if you want
-                to see API-created experiments there. The seeded
-                emulator_test_config account is experimenter@google.com.
-            emulators: Which emulators to start. The REST API needs functions
-                and firestore; auth is only needed if you also use the UI.
-            import_dir: Emulator data to ``--import``, relative to repo_root.
-                Pass None to start from empty state.
-            export_on_exit: Directory to ``--export-on-exit`` into, which makes
-                minted keys and created experiments survive a restart.
-            api_key: Use an existing key instead of minting one. Falls back to
-                $DL_API_KEY, then to minting.
-            startup_timeout: Emulator boot is slow; the repo's own
-                run_locally.sh allows 120s per port.
-            log_path: Where to tee child output. Defaults to a temp file whose
-                tail is included in exceptions.
-            reuse_running: Attach to an already-running emulator suite instead
-                of failing on a port conflict. Nothing it did not start is
-                ever killed.
-        """
         self.repo_root = Path(repo_root).expanduser().resolve()
         self.project_id = project_id
         self.experimenter_email = experimenter_email.lower()
@@ -146,8 +171,9 @@ class LocalBackend:
         self._entered = False
         self._stopped = False
 
-        # Attaching to an already-running suite (e.g. the Docker image) needs
-        # no checkout; firebase.json only matters when we spawn the emulators.
+        # Attaching to an already-running suite (e.g. the backend container)
+        # needs no checkout; firebase.json only matters when we start the
+        # emulators ourselves.
         if not reuse_running and not (self.repo_root / "firebase.json").is_file():
             raise LocalBackendError(
                 f"{self.repo_root} does not look like a Deliberate Lab checkout "
@@ -169,7 +195,10 @@ class LocalBackend:
 
     @property
     def base_url(self) -> str:
-        """Base URL to hand to ``dl.Client(base_url=...)``."""
+        """Base URL of the Deliberate Lab REST API, for ``dl.Client(base_url=...)``.
+
+        :raises LocalBackendError: if used outside the ``with`` block.
+        """
         self._require_entered()
         return (
             f"http://127.0.0.1:{self.functions_port}"
@@ -178,17 +207,28 @@ class LocalBackend:
 
     @property
     def api_key(self) -> str:
+        """Deliberate Lab API key for this backend (given, from ``$DL_API_KEY``,
+        or minted).
+
+        :raises LocalBackendError: if used outside the ``with`` block.
+        """
         self._require_entered()
         assert self._api_key is not None
         return self._api_key
 
     @property
     def log_path(self) -> Optional[Path]:
-        """Where emulator stdout/stderr is being written, if we started it."""
+        """File the emulators' output is written to, or None if this instance
+        did not start them."""
         return self._log_path
 
     def client(self) -> Any:
-        """Build a `deliberate_lab.Client` pointed at this backend."""
+        """Build a ``deliberate_lab.Client`` connected to this backend.
+
+        :return: a ``deliberate_lab.Client``
+        :raises LocalBackendError: if used outside the ``with`` block, or the
+            ``deliberate_lab`` package is not installed.
+        """
         self._require_entered()
         try:
             import deliberate_lab as dl
@@ -203,6 +243,12 @@ class LocalBackend:
     # -- context management -----------------------------------------------
 
     def __enter__(self) -> "LocalBackend":
+        """Start (or attach to) the emulators and wait until the API answers.
+
+        :raises LocalBackendError: if the instance was already used, a port is
+            in use and ``reuse_running`` is False, or the backend does not come
+            up within ``startup_timeout``.
+        """
         if self._entered:
             raise LocalBackendError(
                 "LocalBackend is single-use; create a new instance per with-block."
@@ -284,9 +330,9 @@ class LocalBackend:
             self._log_file = handle
 
         # Put the child in its own process group so we can signal the whole
-        # tree later: `npx firebase` forks a Node process per emulator, and
-        # Firestore/Auth are Java children of those. Killing only the npx PID
-        # orphans them and leaves the ports bound.
+        # tree later: `npx firebase` starts a Node process per emulator, and
+        # Firestore/Auth are Java children of those. Killing only the npx
+        # process orphans them and leaves the ports bound.
         popen_kwargs: dict[str, Any] = {
             "cwd": str(self.repo_root),
             "stdin": subprocess.DEVNULL,
@@ -299,8 +345,8 @@ class LocalBackend:
             popen_kwargs["start_new_session"] = True
 
         self._proc = subprocess.Popen(cmd, **popen_kwargs)
-        # Backstop only: covers `python script.py` dying without unwinding.
-        # The with-block is what normally performs cleanup.
+        # Backstop only, for a script that dies without unwinding. The with
+        # block is what normally cleans up.
         atexit.register(self._stop)
 
     def _stop(self) -> None:
@@ -347,12 +393,12 @@ class LocalBackend:
             time.sleep(0.5)
 
     def _wait_for_api(self) -> None:
-        """Poll GET /v1/health until it answers 200.
+        """Poll ``GET /v1/health`` until it answers 200.
 
-        The functions emulator binds its port before it has loaded the
-        compiled functions, so an open socket is not readiness. A 200 here
-        also proves the minted key resolves in Firestore, which makes this a
-        genuine end-to-end probe.
+        The functions emulator opens its port before it has loaded the
+        compiled functions, so an open port does not mean it is ready. A 200
+        also shows that the API key is found in Firestore, so this checks the
+        whole path end to end.
         """
         deadline = time.monotonic() + self.startup_timeout
         last = "no response yet"
@@ -397,18 +443,19 @@ class LocalBackend:
     # -- API key seeding --------------------------------------------------
 
     def _mint_api_key(self, name: str = "local-backend (python)") -> str:
-        """Write a hashed API key straight into the Firestore emulator.
+        """Write a hashed API key directly into the Firestore emulator and return the key.
 
-        The supported path is the web UI (Settings -> API Keys), which calls
-        the `createDeliberateLabAPIKey` callable. That needs a signed-in
-        experimenter, so for headless use we reproduce what
-        `createDeliberateLabAPIKey` in dl_api_key.utils.ts writes:
-        experimenters/{email}/apiKeys/{keyId} with a scrypt hash and salt.
+        The supported way to create a key is the web UI (Settings -> API
+        Keys), which calls the ``createDeliberateLabAPIKey`` callable function.
+        That requires a signed-in experimenter, so for headless use this
+        reproduces what ``createDeliberateLabAPIKey`` in Deliberate Lab's
+        ``dl_api_key.utils.ts`` writes: ``experimenters/{email}/apiKeys/{keyId}``
+        with a scrypt hash and salt.
 
-        This couples us to backend internals that could change without notice.
-        If the key ever stops being accepted, check that file first, or pass
-        `api_key=` from a key you created in the UI. Never point this at a
-        real project: it depends on the emulator's `Bearer owner` bypass of
+        This depends on backend internals that could change without notice. If
+        the key stops being accepted, check that file first, or pass
+        ``api_key=`` with a key created in the web UI. Only works against the
+        emulator: it relies on the emulator's ``Bearer owner`` bypass of
         security rules.
         """
         if "firestore" not in self.emulators:
@@ -495,7 +542,9 @@ def _http(
     body: bytes | None = None,
     timeout: float = 10.0,
 ) -> tuple[Optional[int], str]:
-    """Returns (status, body). Status is None if the request never landed."""
+    """Send an HTTP request and return ``(status, body)``.
+
+    The status is None if no response arrived."""
     request = urllib.request.Request(
         url, data=body, method=method, headers=dict(headers or {})
     )
@@ -509,7 +558,7 @@ def _http(
 
 
 def _terminate_tree(proc: subprocess.Popen[bytes], timeout: float) -> None:
-    """Signal the whole process group, escalating if it does not go quietly."""
+    """Signal the whole process group, escalating to SIGKILL if it does not exit."""
     if _IS_WINDOWS:  # pragma: no cover - platform specific
         try:
             proc.send_signal(signal.CTRL_BREAK_EVENT)

@@ -1,8 +1,11 @@
-"""create_simulation.py — run agent conversations described by a simulation YAML on a
-Deliberate Lab backend (the local emulator via LocalBackend, or your own deployment via
-FirebaseBackend) and return them as a convokitai Corpus.
+"""Run the agent conversations described by a simulation YAML on a Deliberate Lab backend.
 
-The simulation YAML (as downloaded from the toolkit) looks like:
+This is the lower-level API behind :func:`simulation.simulate`. :func:`create_simulation`
+runs the conversations on a backend that is already running (a local emulator suite via
+:class:`local_backend.LocalBackend`, or your own Deliberate Lab deployment via
+:class:`FirebaseBackend`) and returns them as a ``convokitai`` Corpus.
+
+A simulation YAML looks like this::
 
     description: ...            # shown with the chat, and used as the post description
     blocks:                     # text blocks shown with the chat; the first one fills
@@ -23,14 +26,24 @@ The simulation YAML (as downloaded from the toolkit) looks like:
       mediators: {...}
       assistants: {...}
 
-The translation into Deliberate Lab templates follows the mediator toolkit
-(mediator-toolkit/app/api/create-experiment). Each pairing and block combination runs as
-its own experiment with a single cohort, since mediators join every cohort of their experiment.
+The YAML is translated into Deliberate Lab (https://github.com/PAIR-code/deliberate-lab)
+experiment templates the same way the mediator toolkit creates its experiments. Each pairing
+and block combination runs as its own experiment with a single cohort, since mediators join
+every cohort of their experiment.
 
 Requirements:
-    - A deliberate-lab checkout built per local_backend.py's docstring (local backend only).
-    - A real LLM key (e.g. GEMINI_API_KEY) — otherwise the agents will be created but
-      every response call will fail.
+
+- A Gemini API key for the agents. Without one, the agents are created but every model call
+  fails, so no messages are sent. :func:`simulation.simulate` stores the key in the local
+  backend for you; on your own deployment, save it in the web UI's Settings.
+- To start the emulators from source (as :func:`main` does), a Deliberate Lab checkout set
+  up as described in :mod:`local_backend`. :func:`simulation.simulate` uses the backend
+  container instead and needs no checkout.
+
+Running this module as a script runs a simulation on the emulators of a local Deliberate Lab
+checkout and prints the resulting transcripts (see :func:`main`)::
+
+    GEMINI_API_KEY=... python create_simulation.py /path/to/deliberate-lab simulation.yaml
 """
 
 from __future__ import annotations
@@ -57,8 +70,13 @@ from local_backend import LocalBackend
 
 @dataclass
 class FirebaseBackend:
-    """A user's own deployed Deliberate Lab. api_key is a Deliberate Lab API key
-    created in that deployment's web UI (Settings -> API Keys)."""
+    """Your own deployed Deliberate Lab backend on Firebase.
+
+    :param project_id: Firebase project ID of the deployment
+    :param api_key: Deliberate Lab API key, created in the deployment's web UI under
+        Settings -> API Keys
+    :param region: region the deployment's Cloud Functions run in
+    """
 
     project_id: str
     api_key: str
@@ -66,9 +84,11 @@ class FirebaseBackend:
 
     @property
     def base_url(self) -> str:
+        """Base URL of the deployment's Deliberate Lab REST API."""
         return f"https://{self.region}-{self.project_id}.cloudfunctions.net/api/v1"
 
     def client(self) -> dl.Client:
+        """Build a ``deliberate_lab.Client`` connected to the deployment."""
         return dl.Client(base_url=self.base_url, api_key=self.api_key)
 
 
@@ -85,7 +105,7 @@ PASS_THROUGH_ITEMS = {
     "INITIALIZATION_CONTEXT",
 }
 
-# r/ChangeMyView rules referenced by RULE prompt items (from the toolkit's assistant-reddit/topics.ts)
+# r/ChangeMyView rules referenced by RULE prompt items
 CMV_RULES = {
     "A": (
         "Rule A - Doesn't Explain View",
@@ -137,9 +157,9 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "in character with a short, natural 1-2 sentence message."
 )
 
-# Deployed Deliberate Lab backends from before TrAuSt 2da6892 run a thought call on every agent
-# participant turn and crash if this prompt is missing. The stub keeps the call cheap (newer
-# backends only record the thought).
+# Older Deliberate Lab deployments make a "thought" model call on every agent participant turn
+# and crash if this prompt is missing. The stub keeps that call cheap (newer backends only
+# record the thought).
 AGENT_THOUGHT_PROMPT = [{"type": "TEXT", "text": 'Return exactly this JSON and nothing else: {"thought": ""}'}]
 
 @dataclass
@@ -154,7 +174,15 @@ class _PromptContext:
 
 
 def load_simulation_config(sim_yaml: str | Path | dict) -> dict:
-    """Load a simulation config from a YAML file path, a YAML string, or an already-parsed dict."""
+    """Load a simulation config from a YAML file path, a YAML string, or an already-parsed dict.
+
+    :param sim_yaml: path to the simulation YAML, the YAML itself as a string, or the parsed dict
+    :return: the simulation config
+    :raises ValueError: if ``sim_yaml`` is None, or the config is not a mapping or defines no
+        pairings
+    """
+    if sim_yaml is None:
+        raise ValueError("sim_yaml is required: a path to the simulation YAML, its text, or a dict")
     if isinstance(sim_yaml, dict):
         config = sim_yaml
     elif isinstance(sim_yaml, Path) or os.path.isfile(sim_yaml):
@@ -167,7 +195,7 @@ def load_simulation_config(sim_yaml: str | Path | dict) -> dict:
 
 
 def _get(d: dict | None, key: str, default=None):
-    """d[key], accepting the snake_case key or its camelCase form (the simulation YAML uses both)."""
+    """Return ``d[key]``, accepting the snake_case key or its camelCase form (YAMLs use both)."""
     if not d:
         return default
     if key in d:
@@ -186,7 +214,7 @@ def _exclude_none(value):
 
 
 def _block_variants(config: dict) -> list[list[dict]]:
-    """Every combination of the blocks' descriptions, each as a list of {name, description}."""
+    """Return every combination of the blocks' descriptions, each a list of {name, description}."""
     options = [
         [
             {"name": block.get("name", ""), "description": description}
@@ -198,6 +226,7 @@ def _block_variants(config: dict) -> list[list[dict]]:
 
 
 def _base_context(config: dict, blocks: list[dict]) -> _PromptContext:
+    """Build the prompt placeholder values shared by all members for one block combination."""
     topic = blocks[0] if blocks else {"name": "", "description": ""}
     post_title = config.get("post_title") or topic["description"]
     post_description = config.get("post_description") or config.get("description", "")
@@ -214,8 +243,8 @@ def _base_context(config: dict, blocks: list[dict]) -> _PromptContext:
 
 
 def _context_items(context: str) -> list[dict]:
-    """Expand a CONTEXT item into STAGE_CONTEXT items for the chat stage ('current'),
-    the stages before it ('before'), or both ('all')."""
+    """Expand a CONTEXT item into STAGE_CONTEXT items for the chat stage (``'current'``),
+    the stages before it (``'before'``), or both (``'all'``)."""
     chat_index = STAGE_IDS.index(CHAT_STAGE_ID)
     if context == "all":
         stage_ids = STAGE_IDS[: chat_index + 1]
@@ -277,6 +306,7 @@ def _prompt_items(items: list[dict] | None, default_context: str | None, ctx: _P
 
 
 def _persona(content: dict, persona_type: str) -> dict:
+    """Build the persona part of a Deliberate Lab agent template."""
     persona = content["persona"]
     model = content["model"]
     name = persona.get("name", "")
@@ -294,6 +324,7 @@ def _persona(content: dict, persona_type: str) -> dict:
 
 
 def _generation(content: dict) -> dict:
+    """Build a Deliberate Lab generation config from a definition's ``generation`` settings."""
     generation = content.get("generation") or {}
     return {
         "temperature": generation.get("temperature"),
@@ -303,6 +334,7 @@ def _generation(content: dict) -> dict:
 
 
 def _chat_settings(settings: dict | None) -> dict:
+    """Build Deliberate Lab chat settings, filling in defaults."""
     return {
         "minMessagesBeforeResponding": _get(settings, "min_messages_before_responding", 0),
         "canSelfTriggerCalls": _get(settings, "can_self_trigger_calls", False),
@@ -312,6 +344,7 @@ def _chat_settings(settings: dict | None) -> dict:
 
 
 def _structured_output(config: dict | None) -> dict | None:
+    """Build a Deliberate Lab structured output config, or None if none is configured."""
     if not config:
         return None
     return {
@@ -333,6 +366,7 @@ def _structured_output(config: dict | None) -> dict | None:
 
 
 def _mediator_template(content: dict, ctx: _PromptContext) -> dict:
+    """Build the Deliberate Lab agent mediator template for a mediator definition."""
     context = content.get("context")
     prompt_config = {
         "id": CHAT_STAGE_ID,
@@ -359,6 +393,7 @@ def _mediator_template(content: dict, ctx: _PromptContext) -> dict:
 
 
 def _assistant_template(content: dict, ctx: _PromptContext) -> dict:
+    """Build the Deliberate Lab private assistant template for an assistant definition."""
     context = content.get("context")
     persona = _persona(content, "assistant")
     persona["minCallIntervalMs"] = _get(content["persona"], "min_call_interval_ms")
@@ -382,6 +417,7 @@ def _assistant_template(content: dict, ctx: _PromptContext) -> dict:
 
 
 def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ctx: _PromptContext) -> dict:
+    """Build the Deliberate Lab agent participant template for an agent definition."""
     settings = _get(content, "chat_settings") or {}
     context = settings.get("context") or content.get("context")
     prompt_map = _get(settings, "prompt_map")
@@ -421,8 +457,8 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
         "includeScaffoldingInPrompt": _get(
             settings, "include_scaffolding_in_prompt", _get(content, "include_scaffolding_in_prompt")
         ),
-        # a single prompt is sent as a plain list, which deployments older than keyed prompts
-        # (TrAuSt b19db9c) require and newer ones still accept
+        # a single prompt is sent as a plain list, which older Deliberate Lab deployments
+        # (from before keyed prompts) require and newer ones still accept
         "prompt": prompts if prompt_map else prompts["default"],
         "order": order,
         "addTo": {},
@@ -437,6 +473,7 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
 
 
 def _definition(definitions: dict, section: str, key: str) -> dict:
+    """Return the content of ``definitions[section][key]``, raising ValueError if it is missing."""
     try:
         entry = definitions[section][key]
     except (KeyError, TypeError):
@@ -550,11 +587,12 @@ def _experiment_template(config: dict, pairing: dict, blocks: list[dict]) -> tup
 
 
 def _seed_gemini_api_key(backend: LocalBackend, gemini_api_key: str) -> None:
-    """Write the Gemini key into experimenterData/{email} in the Firestore
-    emulator, matching scripts/seed-api-key.mjs (which run_locally.sh calls
-    but LocalBackend never does). createAgentChatMessageFromPrompt reads this
-    via getExperimenterDataFromExperiment and silently no-ops without it —
-    no error, no chat message, which is why agents go quiet with zero logs.
+    """Store the Gemini API key in ``experimenterData/{email}`` in the Firestore emulator.
+
+    This does what Deliberate Lab's ``scripts/seed-api-key.mjs`` does (which its
+    ``run_locally.sh`` calls, but :class:`local_backend.LocalBackend` does not). The backend
+    reads the key from there when generating agent messages, and without it silently does
+    nothing: there is no error and no chat message, so the agents never speak.
     """
     url = (
         f"http://127.0.0.1:{backend.firestore_port}/v1/projects/"
@@ -600,13 +638,13 @@ def _add_agent_to_cohort(
     cohort_id: str,
     agent: dict,
 ) -> dict:
-    """Spawn a participant instance of an agent template into a cohort.
+    """Add a participant created from an agent template to a cohort.
 
-    Templates passed to create_simulation register the persona/prompt on the
-    experiment; they don't join a cohort until createParticipant is called.
-    agentConfig.modelSettings is required by CreateParticipantData
-    (utils/src/participant.validation.ts) even though the template already
-    carries defaultModelSettings.
+    The templates passed to ``client.create_simulation`` only register the agents' personas
+    and prompts on the experiment; an agent joins a cohort only when ``createParticipant`` is
+    called. Deliberate Lab requires ``agentConfig.modelSettings`` there (see its
+    ``utils/src/participant.validation.ts``) even though the template already has
+    ``defaultModelSettings``.
     """
     # both backends serve the REST API at <functions URL>/api/v1, and
     # createParticipant sits alongside it
@@ -642,7 +680,7 @@ def _add_agent_to_cohort(
 
 
 def _chat_message_count(export: dict) -> int:
-    """How many non-system messages the experiment's chat has."""
+    """Return how many non-system messages the experiment's chat has."""
     return sum(
         m.get("type") != "system"
         for cohort in export.get("cohortMap", {}).values()
@@ -651,8 +689,10 @@ def _chat_message_count(export: dict) -> int:
 
 
 def _failed_model_calls(client: dl.Client, experiment_id: str) -> list[str]:
-    """One line per model call of the experiment that didn't return OK. The backend doesn't retry
-    a failed opening message, so one failure there leaves the chat silent."""
+    """Return one line per model call of the experiment that didn't return OK.
+
+    The backend doesn't retry a failed opening message, so one failure there leaves the chat
+    silent."""
     try:
         logs = client.export_experiment_logs(experiment_id)
     except Exception as exc:  # the logs are only for diagnosis
@@ -693,8 +733,8 @@ def _stall_report(export: dict, failed_calls: list[str] = ()) -> str:
 def _wait_for_agents_in_chat(
     client: dl.Client, experiment_id: str, count: int, timeout: float = 15
 ) -> bool:
-    """Poll until `count` participants of the experiment have reached the chat stage, or until
-    `timeout` seconds have passed.
+    """Poll until ``count`` participants of the experiment have reached the chat stage, or until
+    ``timeout`` seconds have passed; return whether they did.
 
     The backend unlocks the chat when the last participant enters it, but only counts the
     others whose entry has already been saved. If two agents enter at the same moment, each
@@ -718,7 +758,8 @@ def _wait_for_agents_in_chat(
 
 
 def _wait_for_first_message(client: dl.Client, experiment_id: str, timeout: float = 120) -> bool:
-    """Poll until the experiment's chat has a message, or until `timeout` seconds have passed.
+    """Poll until the experiment's chat has a message or ``timeout`` seconds have passed; return
+    whether it has one.
 
     The backend sends each chat's opening messages once, when its agents enter the chat, and
     never retries them; if they fail (e.g. because many model calls at once hit the Gemini rate
@@ -739,6 +780,7 @@ def _wait_for_first_message(client: dl.Client, experiment_id: str, timeout: floa
 
 
 def _format_duration(seconds: float) -> str:
+    """Format seconds as e.g. ``4m05s``."""
     minutes, seconds = divmod(int(seconds), 60)
     return f"{minutes}m{seconds:02d}s"
 
@@ -746,8 +788,8 @@ def _format_duration(seconds: float) -> str:
 def _wait_for_exports(
     client: dl.Client, experiment_ids: list[str], timeout: float | None = None
 ) -> tuple[list[dict], set[str]]:
-    """Poll until every experiment's participants have finished, or until `timeout` seconds
-    have passed, then return all exports (as they stand) and the ids that did not finish."""
+    """Poll until every experiment's participants have finished, or until ``timeout`` seconds
+    have passed, then return all exports (as they stand) and the IDs that did not finish."""
     exports: dict[str, dict] = {}
     deadline = time.monotonic() + timeout if timeout is not None else None
     with tqdm(
@@ -790,6 +832,7 @@ def _wait_for_exports(
 
 
 def _heartbeat(log_path: Path, stop: threading.Event, interval: float = 5.0) -> None:
+    """Print a progress line every ``interval`` seconds until ``stop`` is set."""
     start = time.monotonic()
     while not stop.wait(interval):
         elapsed = int(time.monotonic() - start)
@@ -802,16 +845,32 @@ def create_simulation(
     sim_yaml: str | Path | dict,
     wait_timeout: float | None = None,
 ) -> Corpus:
-    """Run every conversation described by the simulation YAML on the running backend and
-    block until they all finish.
+    """Run every conversation described by the simulation YAML on a running backend and wait
+    until they all finish.
 
-    :param backend: the backend to run on
+    Each pairing and block combination is created as its own experiment with one cohort. The
+    agents are added to the cohort one at a time, and each conversation is started before the
+    next one is created. Progress and warnings are printed.
+
+    Example::
+
+        from create_simulation import FirebaseBackend, create_simulation
+
+        backend = FirebaseBackend(project_id="my-project", api_key="dlb_live_...")
+        corpus = create_simulation(backend, "simulation.yaml")
+
+    :param backend: the backend to run on: a :class:`local_backend.LocalBackend` inside its
+        ``with`` block, or a :class:`FirebaseBackend`
     :param sim_yaml: path to the simulation YAML, the YAML itself as a string, or the parsed dict
     :param wait_timeout: seconds to wait for the conversations to finish before keeping them as
-        they stand. Defaults to max_time plus 5 minutes (or no limit if max_time isn't set).
-    :return: a convokitai Corpus with one Conversation per pairing and block combination.
-        Each Conversation's meta has the pairing id, experiment id, blocks shown, and whether
-        it completed; the corpus's ai_meta["simulation_config"] holds the parsed simulation YAML.
+        they stand. Defaults to ``max_time`` plus 5 minutes (or no limit if ``max_time`` isn't
+        set).
+    :return: a ``convokitai`` Corpus with one Conversation per pairing and block combination
+        that has chat messages. Each Conversation's meta has the pairing ID, experiment ID,
+        blocks shown, and whether it completed; the corpus's
+        ``ai_meta["simulation_config"]`` holds the parsed simulation YAML.
+    :raises ValueError: if the simulation YAML is invalid, or no conversation has any chat
+        messages
     """
     config = load_simulation_config(sim_yaml)
     client = backend.client()
@@ -865,6 +924,21 @@ def create_simulation(
 
 
 def main(repo_root: str, sim_yaml: str, gemini_api_key: str | None = None) -> None:
+    """Run a simulation on emulators started from a Deliberate Lab checkout and print the results.
+
+    Starts the emulators of the checkout at ``repo_root`` with
+    :class:`local_backend.LocalBackend` (printing progress, with the emulator log in the temp
+    directory), stores ``gemini_api_key`` in the backend, runs :func:`create_simulation`,
+    prints the corpus's summary statistics and each conversation's transcript, and stops the
+    emulators. This is what running the module as a script does, with the key taken from the
+    ``GEMINI_API_KEY`` environment variable.
+
+    :param repo_root: path to a Deliberate Lab checkout, set up as described in
+        :mod:`local_backend`
+    :param sim_yaml: path to the simulation YAML, or the YAML itself as a string
+    :param gemini_api_key: Gemini API key for the agents. Without one, the agents send no
+        messages.
+    """
     log_path = Path(tempfile.gettempdir()) / f"dl-run-conversation-{int(time.time())}.log"
     print("starting emulators (first boot can take a couple minutes) — tail progress with:")
     print(f"  tail -f {log_path}")
