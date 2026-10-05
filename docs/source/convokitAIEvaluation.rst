@@ -20,9 +20,9 @@ Example usage:
 Installation
 ------------
 
-From the repository root::
+From the repository root, together with ConvoKit (which includes ``convokitai``)::
 
-    python -m pip install -e ./convokit/convokitai -e ./convokit/convokitai_evaluation
+    python -m pip install -e . -e ./convokit/convokitai_evaluation
 
 or from GitHub::
 

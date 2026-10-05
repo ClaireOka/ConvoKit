@@ -1,4 +1,7 @@
-# Install with:
+# Install for local development (from the repository root), together with ConvoKit, which
+# includes the `convokitai` package:
+#   python -m pip install -e . -e ./convokit/convokitai-simulation
+# Install from GitHub:
 #   pip install "git+https://github.com/CornellNLP/ConvoKit.git@master#subdirectory=convokit/convokitai-simulation"
 [project]
 name = "dl-sim"
@@ -6,6 +9,8 @@ version = "0.1.0"
 description = "Run AI agent conversation simulations on a ConvoArena backend and load them as convokitai corpora"
 requires-python = ">=3.12"
 dependencies = [
+    # ConvoKit 4.2 is the first release that includes the `convokitai` package
+    "convokit>=4.2",
     "pydantic>=2.0",
     "python-dotenv",
     "requests",
@@ -13,8 +18,6 @@ dependencies = [
     "udocker",
     "pyyaml",
     "tqdm",
-    # also requires convokitai, which is installed with ConvoKit from this repository
-    # (see convokit/convokitai/pyproject.toml)
 ]
 
 [build-system]

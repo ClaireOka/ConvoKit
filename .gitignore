@@ -42,7 +42,7 @@ env/
 website/docs/build
 examples/forecaster/deferral_out
 
-# build artifacts of the standalone convokitai package
+# build artifacts of the ConvoKit AI packages
 /convokit/convokitai/*.egg-info
 /convokit/convokitai/build/
 /convokit/convokitai-simulation/*.egg-info

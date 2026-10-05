@@ -23,9 +23,9 @@ Example usage: `simulation demo <https://github.com/CornellNLP/ConvoKit/blob/mas
 Installation
 ------------
 
-From the repository root::
+From the repository root, together with ConvoKit (which includes ``convokitai``)::
 
-    python -m pip install -e ./convokit/convokitai -e ./convokit/convokitai-simulation
+    python -m pip install -e . -e ./convokit/convokitai-simulation
 
 or from GitHub::
 

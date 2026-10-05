@@ -27,13 +27,14 @@ Two companion packages build on this format:
 Installation
 ------------
 
-``convokitai`` is installed together with ConvoKit and imported as a separate top-level package::
+``convokitai`` is part of ConvoKit (version 4.2 and later), so installing ConvoKit also installs
+it::
+
+    pip install convokit
+
+It is imported as a separate top-level package::
 
     import convokitai
-
-To install it on its own, without the rest of ConvoKit's source::
-
-    pip install "git+https://github.com/CornellNLP/ConvoKit.git@master#subdirectory=convokit/convokitai"
 
 Quick start
 -----------
