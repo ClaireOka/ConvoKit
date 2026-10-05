@@ -45,9 +45,7 @@ def is_fragment(text: str) -> bool:
     :return: True if the utterance is a fragment
     """
     words = str(text).split()
-    return len(words) <= 3 or (
-        len(words) <= 5 and not str(text).rstrip().endswith((".", "!", "?"))
-    )
+    return len(words) <= 3 or (len(words) <= 5 and not str(text).rstrip().endswith((".", "!", "?")))
 
 
 class CIG(Transformer):
@@ -144,14 +142,10 @@ class CIG(Transformer):
             n_seen.append(len(seen))
         cut = n_seen.index(len(seen))
         in_context = [i <= cut for i in range(len(utts))]
-        is_target = [
-            not c and not is_fragment(utt.text) for c, utt in zip(in_context, utts)
-        ]
+        is_target = [not c and not is_fragment(utt.text) for c, utt in zip(in_context, utts)]
         return in_context, is_target
 
-    def build_prompt(
-        self, conversation: Conversation
-    ) -> Tuple[Optional[str], List[int]]:
+    def build_prompt(self, conversation: Conversation) -> Tuple[Optional[str], List[int]]:
         """
         Build the rating prompt for a conversation.
 
@@ -165,11 +159,7 @@ class CIG(Transformer):
 
         context, target, targets, skipped = [], [], [], []
         for pos, utt in enumerate(utts):
-            label = (
-                MEDIATOR_LABEL
-                if self.is_mediator(utt.speaker)
-                else names[utt.speaker.id]
-            )
+            label = MEDIATOR_LABEL if self.is_mediator(utt.speaker) else names[utt.speaker.id]
             line = f"{pos}. {label}: {utt.text}"
             (context if in_context[pos] else target).append(line)
             if is_target[pos]:
@@ -204,9 +194,7 @@ class CIG(Transformer):
             int(r["utterance_index"]): int(r["informativeness"]) for r in ratings
         }
 
-    def transform(
-        self, corpus: Corpus, selector: Callable[[Conversation], bool] = lambda c: True
-    ):
+    def transform(self, corpus: Corpus, selector: Callable[[Conversation], bool] = lambda c: True):
         """
         Rate the utterances of the selected conversations and store each rating in
         ``utt.meta[cig_attribute_name]`` (``None`` for utterances that are not rated).

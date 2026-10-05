@@ -150,16 +150,18 @@ class PrivateAssistant:
                 reply_to = generation.last_utterance_id(conversation)
             if reply_to is not None:
                 # end with the last support already given for this reply, if any
-                until = generation.last_support(conversation, reply_to) or conversation.get_utterance(
-                    reply_to
-                )
+                until = generation.last_support(
+                    conversation, reply_to
+                ) or conversation.get_utterance(reply_to)
                 transcript = conversation.get_transcript(supports=True, until=until)
 
         instruction = ""
         if draft:
             instruction += "The draft of the reply written so far:\n{}\n\n".format(draft)
-        instruction += "Write your support message{}. Respond with only the text of the message.".format(
-            " to " + ", ".join(viewers) if viewers else ""
+        instruction += (
+            "Write your support message{}. Respond with only the text of the message.".format(
+                " to " + ", ".join(viewers) if viewers else ""
+            )
         )
         text = generation.call_llm(
             generation.get_client(config, client, config_manager),
@@ -173,7 +175,9 @@ class PrivateAssistant:
             reply_to=reply_to,
             draft=draft,
             private_assistant_id=self.id,
-            timestamp=timestamp if timestamp is not None else generation.next_timestamp(conversation),
+            timestamp=(
+                timestamp if timestamp is not None else generation.next_timestamp(conversation)
+            ),
         )
         if append:
             self.supports.append(support)

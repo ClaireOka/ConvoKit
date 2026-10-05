@@ -19,7 +19,8 @@ also a valid ConvoKit corpus: the AI fields are stored inside the regular metada
 Two companion packages build on this format:
 
 * :doc:`ConvoKit AI Simulation <convokitAISimulation>` runs AI agent conversations on
-  `Deliberate Lab <https://github.com/PAIR-code/deliberate-lab>`_ and returns them as a ConvoKit AI corpus.
+  ConvoArena (built on `Deliberate Lab <https://github.com/PAIR-code/deliberate-lab>`_) and returns
+  them as a ConvoKit AI corpus.
 * :doc:`ConvoKit AI Evaluation <convokitAIEvaluation>` provides transformers that evaluate
   AI-mediated conversations.
 

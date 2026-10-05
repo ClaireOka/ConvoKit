@@ -123,9 +123,7 @@ class Conversation(BaseConversation):
 
         :return: a list of speaker ids (empty if there are no AI speakers)
         """
-        return [
-            speaker.id for speaker in self.iter_speakers() if getattr(speaker, "is_ai", False)
-        ]
+        return [speaker.id for speaker in self.iter_speakers() if getattr(speaker, "is_ai", False)]
 
     @property
     def supports(self) -> List[Support]:

@@ -4,7 +4,7 @@ Rebuild the sample corpus bundled with the examples (``sample_corpus/``).
 This script is only needed to regenerate ``sample_corpus/``; the example notebooks load the
 bundled copy and do not need to run it.
 
-The sample corpus contains the completed cohorts of one simulated Deliberate Lab experiment
+The sample corpus contains the completed cohorts of one simulated ConvoArena experiment
 (one mediator and two simulated participants per cohort, one cohort per stance pair) for each
 of three mediators: a greeting baseline, a paraphrasing baseline, and a constructive mediator.
 The experiments are converted to a ConvoKit AI corpus with ``export_to_corpus`` from the ``convokitai-simulation`` package, and each conversation's
@@ -28,7 +28,7 @@ those sub-folders must contain:
 - ``runs.json``: a list of runs, each with ``mediator`` (the mediator's submission file name)
   and ``experiments`` (a list of objects with ``experiment_id`` and ``completed_cohorts``, the
   ids of the cohorts that finished);
-- ``<experiment_id>/export.json``: the Deliberate Lab export of that experiment, whose
+- ``<experiment_id>/export.json``: the ConvoArena export of that experiment, whose
   ``cohortMap`` holds the cohorts and whose stages include ``chat-round-1`` (the chat, with the
   debate statement) and ``pre-survey-1`` (the pre-conversation survey, whose answer
   ``pre_q1_a.5`` is the participant's reason for their stance);
@@ -89,7 +89,7 @@ def statement(export):
     """
     Get the debate statement shown with the chat, without its ``Statement: "..."`` wrapping.
 
-    :param export: a Deliberate Lab experiment export
+    :param export: a ConvoArena experiment export
     :return: the statement text
     """
     text = export["stageMap"]["chat-round-1"]["descriptions"]["primaryText"].strip()
@@ -106,9 +106,7 @@ for label, (mediator, folder) in SOURCES.items():
             "mediator": label,
             "topic": topic,
             "statement": statement(export),
-            "pre_survey": {
-                sid: a["pre_q1_a.5"]["answer"] for sid, a in answers.items()
-            },
+            "pre_survey": {sid: a["pre_q1_a.5"]["answer"] for sid, a in answers.items()},
         }
 
 corpus = export_to_corpus(exports)

@@ -144,23 +144,25 @@ class Speaker(BaseSpeaker):
             if reply_to is None:
                 reply_to = generation.last_utterance_id(conversation)
             if reply_to is not None:
-                transcript = conversation.get_transcript(
-                    until=conversation.get_utterance(reply_to)
-                )
+                transcript = conversation.get_transcript(until=conversation.get_utterance(reply_to))
         prompt = generation.build_prompt(
             config["prompt"],
             transcript,
             "Write the next message in the conversation as {}. "
             "Respond with only the text of the message.".format(name),
         )
-        text = generation.call_llm(generation.get_client(config, client, config_manager), config, prompt)
+        text = generation.call_llm(
+            generation.get_client(config, client, config_manager), config, prompt
+        )
 
         utterance = Utterance(
             id=id or generation.new_id(),
             speaker=self,
             conversation_id=conversation.id if conversation is not None else None,
             reply_to=reply_to,
-            timestamp=timestamp if timestamp is not None else generation.next_timestamp(conversation),
+            timestamp=(
+                timestamp if timestamp is not None else generation.next_timestamp(conversation)
+            ),
             text=text,
             ai_meta={"config": dict(config)},
         )

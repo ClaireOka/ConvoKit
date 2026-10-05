@@ -70,9 +70,7 @@ def mediator_previous_context_selector(
     :raises ValueError: if ``counterfactual`` is not ``"prev"`` or ``"delete"``
     """
     if counterfactual not in COUNTERFACTUALS:
-        raise ValueError(
-            f"counterfactual must be one of {COUNTERFACTUALS}, got {counterfactual!r}"
-        )
+        raise ValueError(f"counterfactual must be one of {COUNTERFACTUALS}, got {counterfactual!r}")
     actual_contexts, reference_contexts = {}, {}
     utts = list(convo.iter_utterances())
     roles = sorted({utt.meta[role_attribute_name] for utt in utts})
@@ -131,9 +129,7 @@ def mediator_future_context_selector(
         nxt = utts[i + 1]
         if nxt.meta[role_attribute_name] == MEDIATOR_LABEL or not nxt.text.strip():
             continue
-        future_contexts[utt.id] = [
-            role_to_prefix[nxt.meta[role_attribute_name]] + nxt.text
-        ]
+        future_contexts[utt.id] = [role_to_prefix[nxt.meta[role_attribute_name]] + nxt.text]
 
     return future_contexts
 
@@ -240,9 +236,7 @@ class MediatorRedirection(Transformer):
         """
         self.label_roles(corpus, train_selector)
         self.label_roles(corpus, val_selector)
-        self.redirection.fit(
-            corpus, train_selector=train_selector, val_selector=val_selector
-        )
+        self.redirection.fit(corpus, train_selector=train_selector, val_selector=val_selector)
         return self
 
     def transform(

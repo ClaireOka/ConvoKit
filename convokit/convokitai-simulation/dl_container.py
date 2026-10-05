@@ -1,9 +1,9 @@
-"""Run the published Deliberate Lab backend container image.
+"""Run the published ConvoArena backend container image.
 
-The image runs the Firebase emulators for a Deliberate Lab backend
-(https://github.com/PAIR-code/deliberate-lab), so that
+The image runs the Firebase emulators for a ConvoArena backend (ConvoArena is built on
+Deliberate Lab, https://github.com/PAIR-code/deliberate-lab), so that
 ``LocalBackend(..., reuse_running=True)`` from :mod:`local_backend` can attach
-to it without a local Deliberate Lab checkout.
+to it without a local ConvoArena checkout.
 
 Docker is used when a Docker daemon is available (e.g. on a laptop).
 Otherwise the container runs under udocker, which needs neither a daemon nor
@@ -72,7 +72,7 @@ class BackendContainerError(RuntimeError):
 
 
 class BackendContainer:
-    """Runs the Deliberate Lab backend image and waits until its emulators serve requests.
+    """Runs the ConvoArena backend image and waits until its emulators serve requests.
 
     Use it as a context manager, or call :meth:`start` and :meth:`stop` yourself. Only one
     backend can run per machine, since the emulator ports are fixed.
@@ -107,9 +107,9 @@ class BackendContainer:
         self.pull = pull
         self.env = {**DEFAULT_ENV, **(env or {})}
         self.startup_timeout = startup_timeout
-        self.log_path = Path(log_path) if log_path else Path(
-            tempfile.gettempdir()
-        ) / "dl-backend.log"
+        self.log_path = (
+            Path(log_path) if log_path else Path(tempfile.gettempdir()) / "dl-backend.log"
+        )
         self._proc: Optional[subprocess.Popen[bytes]] = None
         self._started = False
 

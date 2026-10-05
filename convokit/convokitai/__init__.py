@@ -10,7 +10,13 @@ Corpora dumped by ``convokitai`` remain valid ConvoKit corpora: the AI fields ar
 regular metadata (see :mod:`convokitai.aiUtil`).
 """
 
-from convokit.model import ConvoKitIndex, ConvoKitMatrix, ConvoKitMeta, CorpusComponent, UtteranceNode
+from convokit.model import (
+    ConvoKitIndex,
+    ConvoKitMatrix,
+    ConvoKitMeta,
+    CorpusComponent,
+    UtteranceNode,
+)
 from convokit.util import download
 from .private_assistant import PrivateAssistant
 from .conversation import Conversation

@@ -1,4 +1,4 @@
-"""Run a Deliberate Lab agent simulation and return it as a ``convokitai`` Corpus."""
+"""Run a ConvoArena agent simulation and return it as a ``convokitai`` Corpus."""
 
 from pathlib import Path
 
@@ -24,11 +24,11 @@ def simulate(
 ) -> Corpus:
     """Run a simulation and return its conversations as a ``convokitai`` Corpus.
 
-    By default the simulation runs on a local Deliberate Lab backend: the
+    By default the simulation runs on a local ConvoArena backend: the
     published backend container is started (see
     :class:`dl_container.BackendContainer`), the Gemini key is stored in it, and
     the container is stopped when the simulation finishes. To run on your own
-    Deliberate Lab deployment instead, pass its Firebase ``project_id`` and a
+    ConvoArena deployment instead, pass its Firebase ``project_id`` and a
     ``dl_api_key``, or a prebuilt ``backend``.
 
     Example::
@@ -41,13 +41,13 @@ def simulate(
     :param gemini_api_key: Gemini API key the agents use. Required for the local
         backend; must not be passed with a deployed backend, which uses the
         Gemini key saved in its web UI (Settings) by the account that owns the
-        Deliberate Lab API key.
+        ConvoArena API key.
     :param sim_yaml: the simulation YAML, as a file path, the YAML text, or the
         parsed dict (see :mod:`create_simulation` for the format).
-    :param project_id: Firebase project ID of a deployed Deliberate Lab to run
+    :param project_id: Firebase project ID of a deployed ConvoArena to run
         on instead of the local backend. Requires ``dl_api_key``; cannot be
         combined with ``backend``.
-    :param dl_api_key: Deliberate Lab API key, created in the deployment's web
+    :param dl_api_key: ConvoArena API key, created in the deployment's web
         UI under Settings -> API Keys. Used only with ``project_id``.
     :param backend: a :class:`create_simulation.FirebaseBackend` to run on, as
         an alternative to ``project_id`` and ``dl_api_key``.
@@ -94,4 +94,3 @@ def simulate(
         ) as local:
             _seed_gemini_api_key(local, gemini_api_key)
             return create_simulation(local, config, wait_timeout)
-

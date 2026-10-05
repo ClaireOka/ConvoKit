@@ -309,9 +309,7 @@ class ClaimTracker(Transformer):
 
     # -- extraction --------------------------------------------------------
 
-    def extract_claims(
-        self, context: str, target: str, speaker: str, turn
-    ) -> List[dict]:
+    def extract_claims(self, context: str, target: str, speaker: str, turn) -> List[dict]:
         """
         Extract the atomic claims of one utterance with the LLM, with near-paraphrases collapsed
         into one claim (the others are kept as its ``siblings``). The speaker is taken from the
@@ -358,8 +356,7 @@ class ClaimTracker(Transformer):
                 (
                     k
                     for k in kept
-                    if k["kind"] == c["kind"]
-                    and self._same_claim(k["claim"], c["claim"])
+                    if k["kind"] == c["kind"] and self._same_claim(k["claim"], c["claim"])
                 ),
                 None,
             )
@@ -403,8 +400,7 @@ class ClaimTracker(Transformer):
                 }
             ],
             "restated": [
-                {"turn": turn, "claim": t, "relation": "sibling"}
-                for t in claim.get("siblings", [])
+                {"turn": turn, "claim": t, "relation": "sibling"} for t in claim.get("siblings", [])
             ],
             "links": [],
             "supersedes": None,
@@ -428,9 +424,7 @@ class ClaimTracker(Transformer):
         ]
 
     @classmethod
-    def held_entries(
-        cls, memory: List[dict], speaker: str, kinds=("own",)
-    ) -> List[dict]:
+    def held_entries(cls, memory: List[dict], speaker: str, kinds=("own",)) -> List[dict]:
         """
         Get the claims a speaker holds: their active entries of the given kinds.
 
@@ -536,9 +530,7 @@ class ClaimTracker(Transformer):
             return {"op": "RESTATE", "relation": rel, "target": tid}
         if rel == "forward_entail":
             merged = update.get("merged_claim")
-            text = (
-                merged.strip() if isinstance(merged, str) and merged.strip() else None
-            )
+            text = merged.strip() if isinstance(merged, str) and merged.strip() else None
             return {"op": "REFINE", "relation": rel, "target": tid, "text": text}
         if update.get("supersedes") is True:
             return {"op": "SUPERSEDE", "relation": rel, "target": tid}
@@ -565,11 +557,7 @@ class ClaimTracker(Transformer):
         used, picked = [False] * len(updates), [None] * len(new_claims)
         for i, c in enumerate(new_claims):
             for j, u in enumerate(updates):
-                src = (
-                    (u.get("source") or {}).get("claim")
-                    if isinstance(u, dict)
-                    else None
-                )
+                src = (u.get("source") or {}).get("claim") if isinstance(u, dict) else None
                 if not used[j] and isinstance(src, str) and src.strip() == c["claim"]:
                     picked[i], used[j] = u, True
                     break
@@ -598,13 +586,10 @@ class ClaimTracker(Transformer):
         for d, c in zip(decisions, new_claims):
             tgt = by_id.get(d["target"]) if d["target"] else None
             sibs = [
-                {"turn": turn, "claim": t, "relation": "sibling"}
-                for t in c.get("siblings", [])
+                {"turn": turn, "claim": t, "relation": "sibling"} for t in c.get("siblings", [])
             ]
             if d["op"] == "RESTATE":
-                tgt["restated"] += [
-                    {"turn": turn, "claim": c["claim"], "relation": d["relation"]}
-                ]
+                tgt["restated"] += [{"turn": turn, "claim": c["claim"], "relation": d["relation"]}]
                 tgt["restated"] += sibs
                 tgt["last_turn"] = turn
                 continue
@@ -675,11 +660,7 @@ class ClaimTracker(Transformer):
         memory, initial, steps = [], {}, []
 
         for sid, name in name_of.items():
-            text = (
-                self.seed_text_func(conversation, speakers[sid])
-                if self.seed_text_func
-                else None
-            )
+            text = self.seed_text_func(conversation, speakers[sid]) if self.seed_text_func else None
             claims = (
                 self.extract_claims(
                     f"Debate topic: {topic}", f"0. {name}: {text}", name, PRE_SURVEY
@@ -705,13 +686,9 @@ class ClaimTracker(Transformer):
             )
 
         for pos, utt in enumerate(utts):
-            name = (
-                MEDIATOR if self.is_mediator(utt.speaker) else name_of[utt.speaker.id]
-            )
+            name = MEDIATOR if self.is_mediator(utt.speaker) else name_of[utt.speaker.id]
             context = "\n".join(lines[max(0, pos - self.context_window) : pos])
-            claims = self.extract_claims(
-                context or f"Debate topic: {topic}", lines[pos], name, pos
-            )
+            claims = self.extract_claims(context or f"Debate topic: {topic}", lines[pos], name, pos)
             step = {
                 "turn": str(pos),
                 "speaker": name,
@@ -727,17 +704,14 @@ class ClaimTracker(Transformer):
                 decisions = self.decide(updates, by_id, claims, name)
                 changed = self.apply_updates(memory, decisions, claims, pos)
                 self._sync_vectors(index, changed)
-                step.update(
-                    shown=[m["id"] for m in shown], updates=updates, decisions=decisions
-                )
+                step.update(shown=[m["id"] for m in shown], updates=updates, decisions=decisions)
             steps.append(step)
 
         return {
             "speakers": {name: sid for sid, name in name_of.items()},
             "initial": initial,
             "final": {
-                n: [m["claim"] for m in self.held_entries(memory, n)]
-                for n in name_of.values()
+                n: [m["claim"] for m in self.held_entries(memory, n)] for n in name_of.values()
             },
             "memory": memory,
             "steps": steps,
@@ -745,9 +719,7 @@ class ClaimTracker(Transformer):
 
     # -- agreement ---------------------------------------------------------
 
-    def claim_agreement(
-        self, claims_a: List[str], claims_b: List[str], name_a: str, name_b: str
-    ):
+    def claim_agreement(self, claims_a: List[str], claims_b: List[str], name_a: str, name_b: str):
         """
         Judge with the LLM which claims of two lists agree or contradict each other.
 
@@ -807,12 +779,8 @@ class ClaimTracker(Transformer):
             {
                 "a": a,
                 "b": b,
-                "initial": self.claim_agreement(
-                    record["initial"][a], record["initial"][b], a, b
-                ),
-                "final": self.claim_agreement(
-                    record["final"][a], record["final"][b], a, b
-                ),
+                "initial": self.claim_agreement(record["initial"][a], record["initial"][b], a, b),
+                "final": self.claim_agreement(record["final"][a], record["final"][b], a, b),
             }
             for a, b in combinations(names, 2)
         ]
@@ -849,9 +817,7 @@ class ClaimTracker(Transformer):
         return hits[0] if len(hits) == 1 else None
 
     @classmethod
-    def origin_of(
-        cls, entry: dict, by_id: Dict[str, dict], names: List[str], seen=frozenset()
-    ):
+    def origin_of(cls, entry: dict, by_id: Dict[str, dict], names: List[str], seen=frozenset()):
         """
         Find who held a claim first, following its ``equivalent`` and ``forward_entail`` links.
 
@@ -870,11 +836,7 @@ class ClaimTracker(Transformer):
         best = (who, _turn(entry["first_turn"]))
         for link in entry["links"]:
             other = by_id.get(link["to"])
-            if (
-                other is None
-                or link["relation"] not in ADOPT_RELS
-                or other["id"] in seen
-            ):
+            if other is None or link["relation"] not in ADOPT_RELS or other["id"] in seen:
                 continue
             cand = cls.origin_of(other, by_id, names, seen | {entry["id"]})
             if cand[1] < best[1]:
@@ -926,11 +888,7 @@ class ClaimTracker(Transformer):
         by_id = {m["id"]: m for m in record["memory"]}
         held = {n: self.held_entries(record["memory"], n) for n in names}
         seeds = {
-            n: [
-                m
-                for m in record["memory"]
-                if m["speaker"] == n and m["first_turn"] == PRE_SURVEY
-            ]
+            n: [m for m in record["memory"] if m["speaker"] == n and m["first_turn"] == PRE_SURVEY]
             for n in names
         }
         out = {}
@@ -963,9 +921,7 @@ class ClaimTracker(Transformer):
                     from_mediator += 1
             out[name] = {
                 "n_new_shared": len(new_shared),
-                "share_new_common_ground": from_mediator / len(new_shared)
-                if new_shared
-                else None,
+                "share_new_common_ground": from_mediator / len(new_shared) if new_shared else None,
             }
         return out
 
@@ -977,9 +933,7 @@ class ClaimTracker(Transformer):
         record["agreement"] = self.judge_agreement(record)
         return record
 
-    def transform(
-        self, corpus: Corpus, selector: Callable[[Conversation], bool] = lambda c: True
-    ):
+    def transform(self, corpus: Corpus, selector: Callable[[Conversation], bool] = lambda c: True):
         """
         Track the claims of the selected conversations and store the results (see the class
         docstring).
@@ -993,9 +947,7 @@ class ClaimTracker(Transformer):
         convos = [convo for convo in corpus.iter_conversations() if selector(convo)]
         results = {}
         with ThreadPoolExecutor(max_workers=self.n_workers) as ex:
-            futures = {
-                ex.submit(self._track_and_judge, convo): convo.id for convo in convos
-            }
+            futures = {ex.submit(self._track_and_judge, convo): convo.id for convo in convos}
             for i, fut in enumerate(as_completed(futures), start=1):
                 try:
                     results[futures[fut]] = fut.result()
@@ -1017,9 +969,7 @@ class ClaimTracker(Transformer):
                     "claims_final": record["final"][name],
                     "claims_share_from_mediator": sources[name]["share_from_mediator"],
                     "claims_share_from_partner": sources[name]["share_from_partner"],
-                    "claims_share_new_common_ground": common[name][
-                        "share_new_common_ground"
-                    ],
+                    "claims_share_new_common_ground": common[name]["share_new_common_ground"],
                 }
                 for key, value in info.items():
                     corpus.set_speaker_convo_info(sid, convo.id, key, value)
@@ -1054,9 +1004,7 @@ class ClaimTracker(Transformer):
                         "agreement_gain": record["agreement"]["gain"],
                         "share_from_mediator": info.get("claims_share_from_mediator"),
                         "share_from_partner": info.get("claims_share_from_partner"),
-                        "share_new_common_ground": info.get(
-                            "claims_share_new_common_ground"
-                        ),
+                        "share_new_common_ground": info.get("claims_share_new_common_ground"),
                     }
                 )
         return pd.DataFrame(rows)

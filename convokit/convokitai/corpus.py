@@ -377,5 +377,7 @@ class Corpus(BaseCorpus):
         """
         super().print_summary_stats()
         print("Number of AI Speakers: {}".format(sum(s.is_ai for s in self.iter_speakers())))
-        print("Number of PrivateAssistants: {}".format(sum(1 for _ in self.iter_private_assistants())))
+        print(
+            "Number of PrivateAssistants: {}".format(sum(1 for _ in self.iter_private_assistants()))
+        )
         print("Number of Supports: {}".format(sum(1 for _ in self.iter_supports())))

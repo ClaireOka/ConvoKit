@@ -3,7 +3,7 @@
 [project]
 name = "dl-sim"
 version = "0.1.0"
-description = "Run AI agent conversation simulations on a Deliberate Lab backend and load them as convokitai corpora"
+description = "Run AI agent conversation simulations on a ConvoArena backend and load them as convokitai corpora"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",

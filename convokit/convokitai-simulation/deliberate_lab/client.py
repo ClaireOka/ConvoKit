@@ -47,9 +47,7 @@ class APIError(requests.HTTPError):
 
     def __init__(self, response: requests.Response, message: str):
         self.message = message
-        super().__init__(
-            f"API Error ({response.status_code}): {message}", response=response
-        )
+        super().__init__(f"API Error ({response.status_code}): {message}", response=response)
 
 
 class Client:
@@ -83,15 +81,11 @@ class Client:
         elif env is None or env == "dev":
             self.base_url = self.DEV_URL
         else:
-            raise ValueError(
-                f"Unknown env '{env}'. Use 'prod', 'dev', or provide a base_url."
-            )
+            raise ValueError(f"Unknown env '{env}'. Use 'prod', 'dev', or provide a base_url.")
         self.api_key = api_key or os.environ.get("DL_API_KEY")
         self.timeout = timeout
         if not self.api_key:
-            raise ValueError(
-                "API key required. Pass api_key parameter or set DL_API_KEY env var."
-            )
+            raise ValueError("API key required. Pass api_key parameter or set DL_API_KEY env var.")
         self._session = requests.Session()
         self._session.headers.update(
             {
@@ -126,9 +120,7 @@ class Client:
         Returns:
             dict with 'experiments' list and 'total' count
         """
-        response = self._session.get(
-            f"{self.base_url}/experiments", timeout=self.timeout
-        )
+        response = self._session.get(f"{self.base_url}/experiments", timeout=self.timeout)
         return self._handle_response(response)
 
     def get_experiment(self, experiment_id: str) -> dict:
@@ -203,23 +195,18 @@ class Client:
 
         # Full template creation takes precedence
         if template is not None:
-            data["template"] = template.model_dump(
-                mode="json", by_alias=True, exclude_none=True
-            )
+            data["template"] = template.model_dump(mode="json", by_alias=True, exclude_none=True)
         else:
             # Simple creation mode
             if name is None:
-                raise ValueError(
-                    "name is required for simple creation (or provide template)"
-                )
+                raise ValueError("name is required for simple creation (or provide template)")
             data["name"] = name
             if description is not None:
                 data["description"] = description
             if stages is not None:
                 # Convert Pydantic models to dicts for JSON serialization
                 data["stages"] = [
-                    s.model_dump(mode="json", by_alias=True, exclude_none=True)
-                    for s in stages
+                    s.model_dump(mode="json", by_alias=True, exclude_none=True) for s in stages
                 ]
             if prolific_config is not None:
                 data["prolificConfig"] = prolific_config.model_dump(
@@ -305,9 +292,7 @@ class Client:
 
         # Full template update takes precedence
         if template is not None:
-            data["template"] = template.model_dump(
-                mode="json", by_alias=True, exclude_none=True
-            )
+            data["template"] = template.model_dump(mode="json", by_alias=True, exclude_none=True)
         else:
             # Partial update mode
             if name is not None:
@@ -316,8 +301,7 @@ class Client:
                 data["description"] = description
             if stages is not None:
                 data["stages"] = [
-                    s.model_dump(mode="json", by_alias=True, exclude_none=True)
-                    for s in stages
+                    s.model_dump(mode="json", by_alias=True, exclude_none=True) for s in stages
                 ]
             if prolific_config is not None:
                 data["prolificConfig"] = prolific_config.model_dump(
@@ -533,9 +517,7 @@ class Client:
             )
         else:
             if name is None:
-                raise ValueError(
-                    "name is required for simple creation (or provide template)"
-                )
+                raise ValueError("name is required for simple creation (or provide template)")
 
             data["name"] = name
 
@@ -544,8 +526,7 @@ class Client:
 
             if stages is not None:
                 data["stages"] = [
-                    s.model_dump(mode="json", by_alias=True, exclude_none=True)
-                    for s in stages
+                    s.model_dump(mode="json", by_alias=True, exclude_none=True) for s in stages
                 ]
 
             if prolific_config is not None:
@@ -699,9 +680,7 @@ class Client:
             status = participant.get("profile", {}).get("currentStatus")
 
             if status not in TERMINAL_STATUSES:
-                raise RuntimeError(
-                    f"Experiment is still running (participant status: {status})."
-                )
+                raise RuntimeError(f"Experiment is still running (participant status: {status}).")
 
         return export
 

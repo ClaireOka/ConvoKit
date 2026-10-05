@@ -1,9 +1,9 @@
-"""Run the Deliberate Lab TypeScript backend locally from Python.
+"""Run the ConvoArena TypeScript backend locally from Python.
 
-:class:`LocalBackend` runs the Firebase emulator suite of a Deliberate Lab
-(https://github.com/PAIR-code/deliberate-lab) checkout, a tree of Node and Java
-processes, as an explicitly scoped service, and mints an API key so that the
-``deliberate_lab`` Python client can talk to it. It can also attach to emulators
+:class:`LocalBackend` runs the Firebase emulator suite of a ConvoArena checkout
+(ConvoArena is built on Deliberate Lab, https://github.com/PAIR-code/deliberate-lab), a tree
+of Node and Java processes, as an explicitly scoped service, and mints an API key so that the
+``deliberate_lab`` Python client (from Deliberate Lab) can talk to it. It can also attach to emulators
 that are already running, such as those in the container started by
 :class:`dl_container.BackendContainer`.
 
@@ -18,13 +18,13 @@ Example::
 
     from local_backend import LocalBackend
 
-    with LocalBackend("~/src/deliberate-lab") as backend:
+    with LocalBackend("~/src/convoarena") as backend:
         client = backend.client()
         print(client.health_check())
         result = client.create_experiment(name="Smoke test")
 
 Requirements for starting the emulators (not for attaching to running ones):
-Python 3.12+, Node with ``npx``, a Deliberate Lab checkout installed with
+Python 3.12+, Node with ``npx``, a ConvoArena checkout installed with
 ``npm ci`` and built with ``npm run build:utils && npm run build:functions``,
 and Java for the Firestore and Auth emulators. This module only uses the
 standard library; the ``deliberate_lab`` client is imported lazily by
@@ -66,7 +66,7 @@ __all__ = ["LocalBackend", "LocalBackendError"]
 
 _IS_WINDOWS = sys.platform == "win32"
 
-# Must match Deliberate Lab's functions/src/dl_api/dl_api_key.utils.ts, which
+# Must match ConvoArena's functions/src/dl_api/dl_api_key.utils.ts, which
 # calls Node's crypto.scrypt with its default cost parameters and passes the
 # salt as a hex *string* (so the salt is the UTF-8 bytes of the hex digits, not
 # the decoded bytes). Verified byte-for-byte against Node.
@@ -82,13 +82,13 @@ class LocalBackendError(RuntimeError):
 
 
 class LocalBackend:
-    """Runs the Deliberate Lab Firebase emulators for the duration of a ``with`` block.
+    """Runs the ConvoArena Firebase emulators for the duration of a ``with`` block.
 
     Inside the block, :attr:`base_url` and :attr:`api_key` give what a
     ``deliberate_lab`` client needs, and :meth:`client` builds one. Each
     instance can be used for only one ``with`` block.
 
-    :param repo_root: Deliberate Lab checkout containing ``firebase.json``.
+    :param repo_root: ConvoArena checkout containing ``firebase.json``.
         Unused when attaching with ``reuse_running=True``.
     :param project_id: Firebase project ID, passed explicitly as ``--project``
         so that the URL path and the emulator always agree. (The checkout's
@@ -110,11 +110,11 @@ class LocalBackend:
     :param functions_port: port of the functions emulator.
     :param firestore_port: port of the Firestore emulator.
     :param auth_port: port of the Auth emulator.
-    :param api_key: an existing Deliberate Lab API key to use instead of
+    :param api_key: an existing ConvoArena API key to use instead of
         minting one. If not given, ``$DL_API_KEY`` is used, and if that is not
         set either, a new key is minted.
     :param startup_timeout: seconds to wait for the emulator ports, and again
-        for the API to answer. Emulator startup is slow; Deliberate Lab's own
+        for the API to answer. Emulator startup is slow; ConvoArena's own
         ``run_locally.sh`` allows 120 seconds per port.
     :param shutdown_timeout: seconds to wait for the emulators to exit after
         SIGTERM before killing them.
@@ -176,8 +176,7 @@ class LocalBackend:
         # emulators ourselves.
         if not reuse_running and not (self.repo_root / "firebase.json").is_file():
             raise LocalBackendError(
-                f"{self.repo_root} does not look like a Deliberate Lab checkout "
-                "(no firebase.json)."
+                f"{self.repo_root} does not look like a ConvoArena checkout " "(no firebase.json)."
             )
         unknown = set(self.emulators) - {
             "functions",
@@ -195,19 +194,16 @@ class LocalBackend:
 
     @property
     def base_url(self) -> str:
-        """Base URL of the Deliberate Lab REST API, for ``dl.Client(base_url=...)``.
+        """Base URL of the ConvoArena REST API, for ``dl.Client(base_url=...)``.
 
         :raises LocalBackendError: if used outside the ``with`` block.
         """
         self._require_entered()
-        return (
-            f"http://127.0.0.1:{self.functions_port}"
-            f"/{self.project_id}/{self.region}/api/v1"
-        )
+        return f"http://127.0.0.1:{self.functions_port}" f"/{self.project_id}/{self.region}/api/v1"
 
     @property
     def api_key(self) -> str:
-        """Deliberate Lab API key for this backend (given, from ``$DL_API_KEY``,
+        """ConvoArena API key for this backend (given, from ``$DL_API_KEY``,
         or minted).
 
         :raises LocalBackendError: if used outside the ``with`` block.
@@ -270,9 +266,7 @@ class LocalBackend:
 
             self._wait_for_ports()
             self._api_key = (
-                self._provided_api_key
-                or os.environ.get("DL_API_KEY")
-                or self._mint_api_key()
+                self._provided_api_key or os.environ.get("DL_API_KEY") or self._mint_api_key()
             )
             self._wait_for_api()
         except BaseException:
@@ -448,7 +442,7 @@ class LocalBackend:
         The supported way to create a key is the web UI (Settings -> API
         Keys), which calls the ``createDeliberateLabAPIKey`` callable function.
         That requires a signed-in experimenter, so for headless use this
-        reproduces what ``createDeliberateLabAPIKey`` in Deliberate Lab's
+        reproduces what ``createDeliberateLabAPIKey`` in ConvoArena's
         ``dl_api_key.utils.ts`` writes: ``experimenters/{email}/apiKeys/{keyId}``
         with a scrypt hash and salt.
 
@@ -485,9 +479,7 @@ class LocalBackend:
                 "experimenterId": {"stringValue": self.experimenter_email},
                 "name": {"stringValue": name},
                 "permissions": {
-                    "arrayValue": {
-                        "values": [{"stringValue": "read"}, {"stringValue": "write"}]
-                    }
+                    "arrayValue": {"values": [{"stringValue": "read"}, {"stringValue": "write"}]}
                 },
                 "createdAt": {"integerValue": str(int(time.time() * 1000))},
                 "lastUsed": {"nullValue": None},
@@ -545,9 +537,7 @@ def _http(
     """Send an HTTP request and return ``(status, body)``.
 
     The status is None if no response arrived."""
-    request = urllib.request.Request(
-        url, data=body, method=method, headers=dict(headers or {})
-    )
+    request = urllib.request.Request(url, data=body, method=method, headers=dict(headers or {}))
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.status, response.read().decode("utf-8", "replace")

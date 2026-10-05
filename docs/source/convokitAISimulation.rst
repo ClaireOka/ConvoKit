@@ -1,9 +1,9 @@
 ConvoKit AI Simulation
 ======================
 
-ConvoKit AI Simulation runs conversations between AI agents on
-`Deliberate Lab <https://github.com/PAIR-code/deliberate-lab>`_, an open-source platform for
-online experiments with humans and AI agents, and returns them as a :doc:`ConvoKit AI <convokitai>`
+ConvoKit AI Simulation runs conversations between AI agents on ConvoArena, a platform for
+online conversation experiments with humans and AI agents built on
+`Deliberate Lab <https://github.com/PAIR-code/deliberate-lab>`_, and returns them as a :doc:`ConvoKit AI <convokitai>`
 corpus. The conversations can include an AI mediator that speaks in the chat and private assistants
 that privately help individual participants.
 
@@ -14,9 +14,9 @@ converts the experiment exports into a corpus.
 
 Simulations run either:
 
-* **locally** (the default): a Deliberate Lab backend runs on the Firebase emulators in a container
+* **locally** (the default): a ConvoArena backend runs on the Firebase emulators in a container
   on your machine, so no Firebase project is needed; or
-* **on your own Deliberate Lab deployment**, using an API key from its web interface.
+* **on your own ConvoArena deployment**, using an API key from its web interface.
 
 Example usage: `simulation demo <https://github.com/CornellNLP/ConvoKit/blob/master/convokit/convokitai-simulation/simulation_demo.ipynb>`_.
 
@@ -32,8 +32,8 @@ or from GitHub::
     pip install "git+https://github.com/CornellNLP/ConvoKit.git@master#subdirectory=convokit/convokitai-simulation"
 
 The modules are installed as top-level modules (``simulation``, ``create_simulation``,
-``export_to_corpus``, ``local_backend``, ``dl_container``), along with ``deliberate_lab``, a Python
-client for the Deliberate Lab REST API.
+``export_to_corpus``, ``local_backend``, ``dl_container``), along with ``deliberate_lab``, the
+Python client for the ConvoArena REST API (from Deliberate Lab).
 
 Running locally also requires:
 
@@ -61,13 +61,13 @@ Run a simulation locally:
 ``simulate`` starts the backend container, runs every conversation, and stops the backend when it is
 done. The first run downloads the backend image and can take a few minutes to start.
 
-To run on your own Deliberate Lab deployment instead, create a Deliberate Lab API key in its web
+To run on your own ConvoArena deployment instead, create a ConvoArena API key in its web
 interface (**Settings → API Keys**) and save your Gemini API key in the same **Settings** page. Then
 pass the Firebase project ID instead of the Gemini key:
 
 .. code-block:: python
 
-    corpus = simulate(sim_yaml="simulation.yaml", project_id="my-deliberate-lab", dl_api_key="dlb_live_...")
+    corpus = simulate(sim_yaml="simulation.yaml", project_id="my-convoarena", dl_api_key="dlb_live_...")
 
 For a deployment whose Cloud Functions run outside ``us-central1``, build the backend yourself:
 
@@ -75,7 +75,7 @@ For a deployment whose Cloud Functions run outside ``us-central1``, build the ba
 
     from create_simulation import FirebaseBackend, create_simulation
 
-    backend = FirebaseBackend(project_id="my-deliberate-lab", api_key="dlb_live_...", region="europe-west1")
+    backend = FirebaseBackend(project_id="my-convoarena", api_key="dlb_live_...", region="europe-west1")
     corpus = create_simulation(backend, "simulation.yaml")
 
 The simulation YAML
@@ -157,7 +157,7 @@ two pairings and a block with three descriptions run six conversations.
 Prompt items
 ^^^^^^^^^^^^
 
-Prompts are lists of items, which are translated into Deliberate Lab prompt items:
+Prompts are lists of items, which are translated into ConvoArena prompt items:
 
 .. list-table::
    :header-rows: 1
@@ -196,7 +196,7 @@ The corpus has one conversation per pairing and topic combination:
 
 * Agents and mediators are AI speakers. Mediators have ``ai_meta["role"] == "public assistant"`` and
   agents have ``"participant"``. ``ai_meta["config"]`` holds the model and prompt, and the full
-  Deliberate Lab agent template under ``"deliberate_lab"``.
+  ConvoArena agent template under ``"deliberate_lab"``.
 * ``convo.alias`` maps speaker IDs to the persona names used in the chat.
 * Utterances keep the model's stated reason for the message in ``ai_meta["explanation"]`` when the
   agent's structured output includes one.
@@ -204,7 +204,7 @@ The corpus has one conversation per pairing and topic combination:
   :class:`~convokitai.private_assistant.PrivateAssistant` and :class:`~convokitai.support.Support`
   objects. Each support keeps the participant's draft at the time.
 * ``convo.meta`` has the ``pairing_id``, whether the conversation ``completed`` before the timeout,
-  the topic ``blocks`` shown, and the Deliberate Lab ``experiment_id``, ``experiment_name`` and
+  the topic ``blocks`` shown, and the ConvoArena ``experiment_id``, ``experiment_name`` and
   ``cohort_name``.
 * ``corpus.ai_meta["simulation_config"]`` holds the parsed simulation YAML.
 
@@ -223,7 +223,7 @@ Running simulations
 .. automodule:: create_simulation
     :members: create_simulation, FirebaseBackend, load_simulation_config
 
-Converting Deliberate Lab exports
+Converting ConvoArena exports
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. automodule:: export_to_corpus

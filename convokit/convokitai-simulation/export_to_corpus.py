@@ -1,7 +1,7 @@
-"""Convert Deliberate Lab experiment exports into a ``convokitai`` Corpus.
+"""Convert ConvoArena experiment exports into a ``convokitai`` Corpus.
 
 An experiment export is the JSON returned by ``deliberate_lab.Client.export_experiment``
-(or downloaded from the Deliberate Lab web UI). The conversion works as follows:
+(or downloaded from the ConvoArena web UI). The conversion works as follows:
 
 - Each cohort becomes a Conversation, whose ID is the cohort ID.
 - Participant and mediator chat messages become Utterances; system messages are skipped.
@@ -29,7 +29,7 @@ from convokitai import Corpus, PrivateAssistant, Speaker, Support, Utterance
 # what an assistant "says" when it decides not to intervene
 SILENT_SUPPORT_TEXT = "Nothing further to add at this point in the conversation."
 
-# Deliberate Lab apiType -> convokit.genai provider name
+# ConvoArena apiType -> convokit.genai provider name
 PROVIDERS = {"GEMINI": "gemini", "OPENAI": "gpt", "OLLAMA": "local"}
 
 
@@ -59,11 +59,15 @@ def _prompt_text(prompt) -> str:
     Context items are dropped, since convokitai adds the transcript itself when generating."""
     if isinstance(prompt, dict):
         prompt = [item for items in prompt.values() for item in items]
-    return "".join(item.get("text", "") for item in prompt or [] if item.get("type") == "TEXT").strip()
+    return "".join(
+        item.get("text", "") for item in prompt or [] if item.get("type") == "TEXT"
+    ).strip()
 
 
-def _generation_config(template: dict | None, stage_id: str, model_settings: dict | None = None) -> dict:
-    """Build a convokitai generation config from a Deliberate Lab agent template.
+def _generation_config(
+    template: dict | None, stage_id: str, model_settings: dict | None = None
+) -> dict:
+    """Build a convokitai generation config from a ConvoArena agent template.
 
     The full template is kept under ``"deliberate_lab"`` so the simulation can be recreated."""
     if not template:
@@ -134,9 +138,13 @@ def _add_export(
             sender_id = message["senderId"]
             if sender_id not in speakers:
                 if message["type"] == "mediator":
-                    config = _generation_config(mediator_map.get(message.get("agentId")), config_stage)
+                    config = _generation_config(
+                        mediator_map.get(message.get("agentId")), config_stage
+                    )
                     speakers[sender_id] = Speaker(
-                        id=sender_id, is_ai=True, ai_meta={"role": "public assistant", "config": config}
+                        id=sender_id,
+                        is_ai=True,
+                        ai_meta={"role": "public assistant", "config": config},
                     )
                 else:
                     profile = participant_map.get(sender_id, {}).get("profile", {})
@@ -206,7 +214,9 @@ def _add_export(
                         record_assistant_id,
                         PrivateAssistant(
                             id=record_assistant_id,
-                            config=_generation_config(assistant_map.get(record_assistant_id), config_stage),
+                            config=_generation_config(
+                                assistant_map.get(record_assistant_id), config_stage
+                            ),
                             speakers=[profile["publicId"]],
                             conversation_id=cohort_id,
                         ),
@@ -250,7 +260,7 @@ def _add_export(
 
 def export_to_corpus(exports: dict | Iterable[dict], keep_silent_supports: bool = True) -> Corpus:
     """
-    Convert one or more Deliberate Lab experiment exports into a ``convokitai`` Corpus, with
+    Convert one or more ConvoArena experiment exports into a ``convokitai`` Corpus, with
     one Conversation per cohort.
 
     Each Conversation's meta has the experiment ID and name, the cohort name, and the chat

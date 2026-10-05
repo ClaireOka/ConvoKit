@@ -1,8 +1,8 @@
-"""Run the agent conversations described by a simulation YAML on a Deliberate Lab backend.
+"""Run the agent conversations described by a simulation YAML on a ConvoArena backend.
 
 This is the lower-level API behind :func:`simulation.simulate`. :func:`create_simulation`
 runs the conversations on a backend that is already running (a local emulator suite via
-:class:`local_backend.LocalBackend`, or your own Deliberate Lab deployment via
+:class:`local_backend.LocalBackend`, or your own ConvoArena deployment via
 :class:`FirebaseBackend`) and returns them as a ``convokitai`` Corpus.
 
 A simulation YAML looks like this::
@@ -26,8 +26,8 @@ A simulation YAML looks like this::
       mediators: {...}
       assistants: {...}
 
-The YAML is translated into Deliberate Lab (https://github.com/PAIR-code/deliberate-lab)
-experiment templates the same way the mediator toolkit creates its experiments. Each pairing
+The YAML is translated into ConvoArena experiment templates (ConvoArena is built on
+Deliberate Lab, https://github.com/PAIR-code/deliberate-lab) the same way the mediator toolkit creates its experiments. Each pairing
 and block combination runs as its own experiment with a single cohort, since mediators join
 every cohort of their experiment.
 
@@ -36,14 +36,14 @@ Requirements:
 - A Gemini API key for the agents. Without one, the agents are created but every model call
   fails, so no messages are sent. :func:`simulation.simulate` stores the key in the local
   backend for you; on your own deployment, save it in the web UI's Settings.
-- To start the emulators from source (as :func:`main` does), a Deliberate Lab checkout set
+- To start the emulators from source (as :func:`main` does), a ConvoArena checkout set
   up as described in :mod:`local_backend`. :func:`simulation.simulate` uses the backend
   container instead and needs no checkout.
 
-Running this module as a script runs a simulation on the emulators of a local Deliberate Lab
+Running this module as a script runs a simulation on the emulators of a local ConvoArena
 checkout and prints the resulting transcripts (see :func:`main`)::
 
-    GEMINI_API_KEY=... python create_simulation.py /path/to/deliberate-lab simulation.yaml
+    GEMINI_API_KEY=... python create_simulation.py /path/to/convoarena simulation.yaml
 """
 
 from __future__ import annotations
@@ -70,10 +70,10 @@ from local_backend import LocalBackend
 
 @dataclass
 class FirebaseBackend:
-    """Your own deployed Deliberate Lab backend on Firebase.
+    """Your own deployed ConvoArena backend on Firebase.
 
     :param project_id: Firebase project ID of the deployment
-    :param api_key: Deliberate Lab API key, created in the deployment's web UI under
+    :param api_key: ConvoArena API key, created in the deployment's web UI under
         Settings -> API Keys
     :param region: region the deployment's Cloud Functions run in
     """
@@ -84,7 +84,7 @@ class FirebaseBackend:
 
     @property
     def base_url(self) -> str:
-        """Base URL of the deployment's Deliberate Lab REST API."""
+        """Base URL of the deployment's ConvoArena REST API."""
         return f"https://{self.region}-{self.project_id}.cloudfunctions.net/api/v1"
 
     def client(self) -> dl.Client:
@@ -96,7 +96,7 @@ PROFILE_STAGE_ID = "profile"
 CHAT_STAGE_ID = "chat-round-1"
 STAGE_IDS = [PROFILE_STAGE_ID, CHAT_STAGE_ID]
 
-# prompt item types passed through to Deliberate Lab unchanged
+# prompt item types passed through to ConvoArena unchanged
 PASS_THROUGH_ITEMS = {
     "PROFILE_INFO",
     "PARTICIPANT_INFO",
@@ -157,10 +157,13 @@ DEFAULT_AGENT_INSTRUCTIONS = (
     "in character with a short, natural 1-2 sentence message."
 )
 
-# Older Deliberate Lab deployments make a "thought" model call on every agent participant turn
+# Older ConvoArena deployments make a "thought" model call on every agent participant turn
 # and crash if this prompt is missing. The stub keeps that call cheap (newer backends only
 # record the thought).
-AGENT_THOUGHT_PROMPT = [{"type": "TEXT", "text": 'Return exactly this JSON and nothing else: {"thought": ""}'}]
+AGENT_THOUGHT_PROMPT = [
+    {"type": "TEXT", "text": 'Return exactly this JSON and nothing else: {"thought": ""}'}
+]
+
 
 @dataclass
 class _PromptContext:
@@ -268,8 +271,10 @@ def _context_items(context: str) -> list[dict]:
     ]
 
 
-def _prompt_items(items: list[dict] | None, default_context: str | None, ctx: _PromptContext) -> list[dict]:
-    """Translate simulation YAML prompt items into Deliberate Lab prompt items."""
+def _prompt_items(
+    items: list[dict] | None, default_context: str | None, ctx: _PromptContext
+) -> list[dict]:
+    """Translate simulation YAML prompt items into ConvoArena prompt items."""
     out = []
     for item in sorted(items or [], key=lambda i: i.get("id", 0)):
         kind = item["type"]
@@ -299,14 +304,16 @@ def _prompt_items(items: list[dict] | None, default_context: str | None, ctx: _P
             if rule not in CMV_RULES:
                 raise ValueError(f"unknown rule {rule!r}; must be one of {', '.join(CMV_RULES)}")
             title, description = CMV_RULES[rule]
-            out.append({"type": "TEXT", "text": f"Rule Title: {title}\nRule Description: {description}"})
+            out.append(
+                {"type": "TEXT", "text": f"Rule Title: {title}\nRule Description: {description}"}
+            )
         else:
             raise ValueError(f"unknown prompt item type {kind!r}")
     return out
 
 
 def _persona(content: dict, persona_type: str) -> dict:
-    """Build the persona part of a Deliberate Lab agent template."""
+    """Build the persona part of a ConvoArena agent template."""
     persona = content["persona"]
     model = content["model"]
     name = persona.get("name", "")
@@ -324,7 +331,7 @@ def _persona(content: dict, persona_type: str) -> dict:
 
 
 def _generation(content: dict) -> dict:
-    """Build a Deliberate Lab generation config from a definition's ``generation`` settings."""
+    """Build a ConvoArena generation config from a definition's ``generation`` settings."""
     generation = content.get("generation") or {}
     return {
         "temperature": generation.get("temperature"),
@@ -334,7 +341,7 @@ def _generation(content: dict) -> dict:
 
 
 def _chat_settings(settings: dict | None) -> dict:
-    """Build Deliberate Lab chat settings, filling in defaults."""
+    """Build ConvoArena chat settings, filling in defaults."""
     return {
         "minMessagesBeforeResponding": _get(settings, "min_messages_before_responding", 0),
         "canSelfTriggerCalls": _get(settings, "can_self_trigger_calls", False),
@@ -344,7 +351,7 @@ def _chat_settings(settings: dict | None) -> dict:
 
 
 def _structured_output(config: dict | None) -> dict | None:
-    """Build a Deliberate Lab structured output config, or None if none is configured."""
+    """Build a ConvoArena structured output config, or None if none is configured."""
     if not config:
         return None
     return {
@@ -358,7 +365,10 @@ def _structured_output(config: dict | None) -> dict | None:
         "schema": {
             "type": "OBJECT",
             "properties": [
-                {"name": name, "schema": {"type": field["type"], "description": field.get("description", "")}}
+                {
+                    "name": name,
+                    "schema": {"type": field["type"], "description": field.get("description", "")},
+                }
                 for name, field in (config.get("schema") or {}).items()
             ],
         },
@@ -366,7 +376,7 @@ def _structured_output(config: dict | None) -> dict | None:
 
 
 def _mediator_template(content: dict, ctx: _PromptContext) -> dict:
-    """Build the Deliberate Lab agent mediator template for a mediator definition."""
+    """Build the ConvoArena agent mediator template for a mediator definition."""
     context = content.get("context")
     prompt_config = {
         "id": CHAT_STAGE_ID,
@@ -374,15 +384,21 @@ def _mediator_template(content: dict, ctx: _PromptContext) -> dict:
         "includeScaffoldingInPrompt": _get(content, "include_scaffolding_in_prompt"),
         "prompt": _prompt_items(content.get("prompt"), context, ctx),
         "shouldRespondPrompt": _prompt_items(
-            _get(content, "should_respond_prompt"), _get(content, "should_respond_context") or context, ctx
+            _get(content, "should_respond_prompt"),
+            _get(content, "should_respond_context") or context,
+            ctx,
         ),
-        "minParticipantMessagesBeforeResponding": _get(content, "min_participant_messages_before_responding"),
+        "minParticipantMessagesBeforeResponding": _get(
+            content, "min_participant_messages_before_responding"
+        ),
         "structuredOutputConfig": _structured_output(_get(content, "structured_output")),
         "generationConfig": _generation(content),
         "chatSettings": _chat_settings(_get(content, "chat_settings")),
         "numRetries": _get(content, "num_retries"),
     }
-    init_prompt = _get(content, "initialization_context_prompt") or _get(content, "preload_context_prompt")
+    init_prompt = _get(content, "initialization_context_prompt") or _get(
+        content, "preload_context_prompt"
+    )
     if init_prompt:
         prompt_config["initializationContextPrompt"] = _prompt_items(
             init_prompt, _get(content, "initialization_context_context") or context, ctx
@@ -393,7 +409,7 @@ def _mediator_template(content: dict, ctx: _PromptContext) -> dict:
 
 
 def _assistant_template(content: dict, ctx: _PromptContext) -> dict:
-    """Build the Deliberate Lab private assistant template for an assistant definition."""
+    """Build the ConvoArena private assistant template for an assistant definition."""
     context = content.get("context")
     persona = _persona(content, "assistant")
     persona["minCallIntervalMs"] = _get(content["persona"], "min_call_interval_ms")
@@ -407,7 +423,9 @@ def _assistant_template(content: dict, ctx: _PromptContext) -> dict:
         "order": {},
         "addTo": {},
         "shouldRespondPrompt": _prompt_items(
-            _get(content, "should_respond_prompt"), _get(content, "should_respond_context") or context, ctx
+            _get(content, "should_respond_prompt"),
+            _get(content, "should_respond_context") or context,
+            ctx,
         ),
         "structuredOutputConfig": _structured_output(_get(content, "structured_output")),
         "generationConfig": _generation(content),
@@ -416,14 +434,17 @@ def _assistant_template(content: dict, ctx: _PromptContext) -> dict:
     return {"persona": persona, "promptMap": {CHAT_STAGE_ID: prompt_config}}
 
 
-def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ctx: _PromptContext) -> dict:
-    """Build the Deliberate Lab agent participant template for an agent definition."""
+def _agent_template(
+    content: dict, persona_id: str, assistant_id: str | None, ctx: _PromptContext
+) -> dict:
+    """Build the ConvoArena agent participant template for an agent definition."""
     settings = _get(content, "chat_settings") or {}
     context = settings.get("context") or content.get("context")
     prompt_map = _get(settings, "prompt_map")
     if prompt_map:
         prompts = {
-            key: _prompt_items(entry.get("prompt"), context, ctx) for key, entry in prompt_map.items()
+            key: _prompt_items(entry.get("prompt"), context, ctx)
+            for key, entry in prompt_map.items()
         }
         order: dict[int, list[str]] = {}
         for key, entry in prompt_map.items():
@@ -437,7 +458,9 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
     persona["assistantId"] = assistant_id
 
     has_instructions = any(
-        item["type"] == "TEXT" and item["text"].strip() for items in prompts.values() for item in items
+        item["type"] == "TEXT" and item["text"].strip()
+        for items in prompts.values()
+        for item in items
     )
     if not has_instructions:
         # the last pipeline step writes the chat message
@@ -455,9 +478,11 @@ def _agent_template(content: dict, persona_id: str, assistant_id: str | None, ct
         "id": CHAT_STAGE_ID,
         "type": "chat",
         "includeScaffoldingInPrompt": _get(
-            settings, "include_scaffolding_in_prompt", _get(content, "include_scaffolding_in_prompt")
+            settings,
+            "include_scaffolding_in_prompt",
+            _get(content, "include_scaffolding_in_prompt"),
         ),
-        # a single prompt is sent as a plain list, which older Deliberate Lab deployments
+        # a single prompt is sent as a plain list, which older ConvoArena deployments
         # (from before keyed prompts) require and newer ones still accept
         "prompt": prompts if prompt_map else prompts["default"],
         "order": order,
@@ -477,11 +502,15 @@ def _definition(definitions: dict, section: str, key: str) -> dict:
     try:
         entry = definitions[section][key]
     except (KeyError, TypeError):
-        raise ValueError(f"a pairing references {key!r}, which is not in definitions.{section}") from None
+        raise ValueError(
+            f"a pairing references {key!r}, which is not in definitions.{section}"
+        ) from None
     return entry.get("content", entry)
 
 
-def _experiment_template(config: dict, pairing: dict, blocks: list[dict]) -> tuple[dict, dict, list[dict]]:
+def _experiment_template(
+    config: dict, pairing: dict, blocks: list[dict]
+) -> tuple[dict, dict, list[dict]]:
     """Build the experiment template for one pairing and block combination.
 
     :return: the template, its cohort participant config, and the agent participant templates
@@ -504,7 +533,9 @@ def _experiment_template(config: dict, pairing: dict, blocks: list[dict]) -> tup
         content = _definition(definitions, "agents", key)
         character = content["persona"].get("character")
         member_ctx = replace(
-            ctx, role=member.get("role") or "", character=character if isinstance(character, str) else ""
+            ctx,
+            role=member.get("role") or "",
+            character=character if isinstance(character, str) else "",
         )
         assistant_id = None
         if member.get("assistant"):
@@ -536,14 +567,23 @@ def _experiment_template(config: dict, pairing: dict, blocks: list[dict]) -> tup
             "kind": "profile",
             "name": "Profile Setup",
             "descriptions": {"primaryText": "Set up your profile", "infoText": "", "helpText": ""},
-            "progress": {"minParticipants": 1, "waitForAllParticipants": False, "showParticipantProgress": False},
+            "progress": {
+                "minParticipants": 1,
+                "waitForAllParticipants": False,
+                "showParticipantProgress": False,
+            },
             "profileType": "ANONYMOUS_ANIMAL",
         },
         {
             "id": CHAT_STAGE_ID,
             "kind": "chat",
             "name": "Conversation",
-            "descriptions": {"primaryText": description, "infoText": "", "helpText": "", "blocks": blocks},
+            "descriptions": {
+                "primaryText": description,
+                "infoText": "",
+                "helpText": "",
+                "blocks": blocks,
+            },
             "progress": {
                 "minParticipants": len(agents),
                 "waitForAllParticipants": False,
@@ -589,7 +629,7 @@ def _experiment_template(config: dict, pairing: dict, blocks: list[dict]) -> tup
 def _seed_gemini_api_key(backend: LocalBackend, gemini_api_key: str) -> None:
     """Store the Gemini API key in ``experimenterData/{email}`` in the Firestore emulator.
 
-    This does what Deliberate Lab's ``scripts/seed-api-key.mjs`` does (which its
+    This does what ConvoArena's ``scripts/seed-api-key.mjs`` does (which its
     ``run_locally.sh`` calls, but :class:`local_backend.LocalBackend` does not). The backend
     reads the key from there when generating agent messages, and without it silently does
     nothing: there is no error and no chat message, so the agents never speak.
@@ -642,7 +682,7 @@ def _add_agent_to_cohort(
 
     The templates passed to ``client.create_simulation`` only register the agents' personas
     and prompts on the experiment; an agent joins a cohort only when ``createParticipant`` is
-    called. Deliberate Lab requires ``agentConfig.modelSettings`` there (see its
+    called. ConvoArena requires ``agentConfig.modelSettings`` there (see its
     ``utils/src/participant.validation.ts``) even though the template already has
     ``defaultModelSettings``.
     """
@@ -670,9 +710,7 @@ def _add_agent_to_cohort(
         timeout=60,
     )
     if not resp.ok:
-        raise RuntimeError(
-            f"createParticipant failed: {resp.status_code} {resp.text}"
-        )
+        raise RuntimeError(f"createParticipant failed: {resp.status_code} {resp.text}")
     body = resp.json()
     if "error" in body:
         raise RuntimeError(f"createParticipant error: {body['error']}")
@@ -705,7 +743,9 @@ def _failed_model_calls(client: dl.Client, experiment_id: str) -> list[str]:
         who = (log.get("userProfile") or {}).get("name") or log.get("publicId")
         what = log.get("description") or "chat message"
         error = response.get("errorMessage") or ""
-        lines.append(f"    model call failed: {who} ({what}): {response.get('status')} {error}".rstrip())
+        lines.append(
+            f"    model call failed: {who} ({what}): {response.get('status')} {error}".rstrip()
+        )
     return lines
 
 
@@ -892,13 +932,19 @@ def create_simulation(
             cohort = result["cohorts"][0]
             cohort_id = cohort["cohort"]["id"] if "cohort" in cohort else cohort["id"]
             topic = "; ".join(block["description"] for block in blocks)
-            print(f"created experiment {experiment_id}, cohort {cohort_id} (pairing {pairing.get('id')}: {topic})")
+            print(
+                f"created experiment {experiment_id}, cohort {cohort_id} (pairing {pairing.get('id')}: {topic})"
+            )
 
             for joined, agent in enumerate(agents, start=1):
                 _add_agent_to_cohort(backend, experiment_id, cohort_id, agent)
                 print(f"  {agent['persona']['id']} joined")
-                if joined < len(agents) and not _wait_for_agents_in_chat(client, experiment_id, joined):
-                    print(f"  WARNING: {agent['persona']['id']} hasn't reached the chat yet; adding the next agent anyway")
+                if joined < len(agents) and not _wait_for_agents_in_chat(
+                    client, experiment_id, joined
+                ):
+                    print(
+                        f"  WARNING: {agent['persona']['id']} hasn't reached the chat yet; adding the next agent anyway"
+                    )
             runs.append((experiment_id, cohort_id, pairing.get("id")))
 
             if _wait_for_first_message(client, experiment_id):
@@ -918,13 +964,15 @@ def create_simulation(
             convo.meta["pairing_id"] = pairing_id
             convo.meta["completed"] = experiment_id not in unfinished
         else:
-            print(f"WARNING: experiment {experiment_id} has no chat messages, so it is not in the corpus")
+            print(
+                f"WARNING: experiment {experiment_id} has no chat messages, so it is not in the corpus"
+            )
     corpus.ai_meta = {"simulation_config": config}
     return corpus
 
 
 def main(repo_root: str, sim_yaml: str, gemini_api_key: str | None = None) -> None:
-    """Run a simulation on emulators started from a Deliberate Lab checkout and print the results.
+    """Run a simulation on emulators started from a ConvoArena checkout and print the results.
 
     Starts the emulators of the checkout at ``repo_root`` with
     :class:`local_backend.LocalBackend` (printing progress, with the emulator log in the temp
@@ -933,7 +981,7 @@ def main(repo_root: str, sim_yaml: str, gemini_api_key: str | None = None) -> No
     emulators. This is what running the module as a script does, with the key taken from the
     ``GEMINI_API_KEY`` environment variable.
 
-    :param repo_root: path to a Deliberate Lab checkout, set up as described in
+    :param repo_root: path to a ConvoArena checkout, set up as described in
         :mod:`local_backend`
     :param sim_yaml: path to the simulation YAML, or the YAML itself as a string
     :param gemini_api_key: Gemini API key for the agents. Without one, the agents send no
@@ -944,9 +992,7 @@ def main(repo_root: str, sim_yaml: str, gemini_api_key: str | None = None) -> No
     print(f"  tail -f {log_path}")
 
     stop_heartbeat = threading.Event()
-    heartbeat = threading.Thread(
-        target=_heartbeat, args=(log_path, stop_heartbeat), daemon=True
-    )
+    heartbeat = threading.Thread(target=_heartbeat, args=(log_path, stop_heartbeat), daemon=True)
     heartbeat.start()
     backend_cm = LocalBackend(repo_root, log_path=log_path)
     try:
@@ -981,5 +1027,5 @@ def main(repo_root: str, sim_yaml: str, gemini_api_key: str | None = None) -> No
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        sys.exit("usage: python create_simulation.py /path/to/deliberate-lab simulation.yaml")
+        sys.exit("usage: python create_simulation.py /path/to/convoarena simulation.yaml")
     main(sys.argv[1], sys.argv[2], os.environ.get("GEMINI_API_KEY"))

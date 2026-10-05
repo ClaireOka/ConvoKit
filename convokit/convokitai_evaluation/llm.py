@@ -130,6 +130,4 @@ class GPT5Client(LLMClient):
         :param prompt: the prompt
         :return: the parsed JSON (dict or list)
         """
-        return self._retry(
-            lambda: parse_json(self._call(prompt).choices[0].message.content)
-        )
+        return self._retry(lambda: parse_json(self._call(prompt).choices[0].message.content))
