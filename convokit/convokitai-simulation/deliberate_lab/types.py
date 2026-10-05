@@ -698,7 +698,9 @@ class GoogleThinkingConfig(BaseModel):
     )
     thinkingBudget: int | None = None
     includeThoughts: bool | None = None
-    thinkingLevel: Annotated[GoogleThinkingLevel | None, Field(title="GoogleThinkingLevel")] = None
+    thinkingLevel: Annotated[
+        GoogleThinkingLevel | None, Field(title="GoogleThinkingLevel")
+    ] = None
 
 
 class GoogleSafetyCategory(StrEnum):
@@ -765,7 +767,9 @@ class OpenAIProviderOptions(BaseModel):
         extra="forbid",
         populate_by_name=True,
     )
-    reasoningEffort: Annotated[ReasoningEffort | None, Field(title="ReasoningEffort")] = None
+    reasoningEffort: Annotated[
+        ReasoningEffort | None, Field(title="ReasoningEffort")
+    ] = None
     parallelToolCalls: bool | None = None
 
 
@@ -983,7 +987,10 @@ class RevealStageConfig(BaseModel):
     descriptions: StageTextConfig
     progress: StageProgressConfig
     items: list[
-        ChipRevealItem | RankingRevealItem | SurveyRevealItem | MultiAssetAllocationRevealItem
+        ChipRevealItem
+        | RankingRevealItem
+        | SurveyRevealItem
+        | MultiAssetAllocationRevealItem
     ]
 
 
@@ -1049,7 +1056,9 @@ class ChatStageConfig(BaseModel):
     discussions: list[DefaultChatDiscussion | CompareChatDiscussion]
 
 
-class RankingStageConfig(RootModel[ItemRankingStageConfig | ParticipantRankingStageConfig]):
+class RankingStageConfig(
+    RootModel[ItemRankingStageConfig | ParticipantRankingStageConfig]
+):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1081,7 +1090,9 @@ class ModelGenerationConfig(BaseModel):
     topP: float | None = None
     frequencyPenalty: float | None = None
     presencePenalty: float | None = None
-    reasoningLevel: Annotated[ReasoningLevel | None, Field(title="ReasoningLevel")] = None
+    reasoningLevel: Annotated[
+        ReasoningLevel | None, Field(title="ReasoningLevel")
+    ] = None
     reasoningBudget: int | None = None
     includeReasoning: bool | None = None
     disableSafetyFilters: bool | None = None
@@ -1366,7 +1377,10 @@ class TransferStageConfig(BaseModel):
     enableTimeout: bool
     timeoutSeconds: float
     autoTransferConfig: (
-        DefaultAutoTransferConfig | SurveyAutoTransferConfig | ConditionAutoTransferConfig | None
+        DefaultAutoTransferConfig
+        | SurveyAutoTransferConfig
+        | ConditionAutoTransferConfig
+        | None
     ) = None
 
 
@@ -1802,7 +1816,9 @@ class AgentAssistantTemplate(BaseModel):
     ]
 
 
-class JSONSchemaDefinition(RootModel[String | Number | Integer | Boolean | Object | Array]):
+class JSONSchemaDefinition(
+    RootModel[String | Number | Integer | Boolean | Object | Array]
+):
     model_config = ConfigDict(
         populate_by_name=True,
     )
