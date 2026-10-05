@@ -52,3 +52,7 @@ examples/forecaster/deferral_out
 /convokit/convokitai-simulation/convokit_simulation/backend/*.log
 # the simulation backend needs its JSON files (firebase.json, package.json, emulator data, ...)
 !/convokit/convokitai-simulation/**/*.json
+
+# sample corpus for the convokitai_evaluation examples
+!/convokit/convokitai_evaluation/examples/sample_corpus/*.json
+!/convokit/convokitai_evaluation/examples/sample_corpus/*.jsonl

@@ -1,0 +1,30 @@
+# Install for local development (from the repository root):
+#   python -m pip install -e ./convokit/convokitai -e ./convokit/convokitai_evaluation
+# Install from GitHub:
+#   pip install "git+https://github.com/ClaireOka/ConvoKit.git@master#subdirectory=convokit/convokitai_evaluation"
+
+[project]
+name = "convokitai-evaluation"
+version = "0.1.0"
+description = "Evaluation metrics for mediated multi-party conversations: CIG, claim consensus, mediator redirection"
+requires-python = ">=3.12"
+dependencies = [
+    "convokit>=4.1",
+    "convokitai",
+    "openai>=1.3.5",
+    "sentence-transformers",
+    "numpy",
+    "pandas",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# this folder is itself the `convokitai_evaluation` package
+packages = ["convokitai_evaluation"]
+package-dir = { "convokitai_evaluation" = "." }
+
+[tool.setuptools.package-data]
+convokitai_evaluation = ["prompts/*.txt"]
