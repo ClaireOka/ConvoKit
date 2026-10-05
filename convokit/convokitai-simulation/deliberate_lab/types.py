@@ -698,9 +698,7 @@ class GoogleThinkingConfig(BaseModel):
     )
     thinkingBudget: int | None = None
     includeThoughts: bool | None = None
-    thinkingLevel: Annotated[
-        GoogleThinkingLevel | None, Field(title="GoogleThinkingLevel")
-    ] = None
+    thinkingLevel: Annotated[GoogleThinkingLevel | None, Field(title="GoogleThinkingLevel")] = None
 
 
 class GoogleSafetyCategory(StrEnum):
@@ -767,9 +765,7 @@ class OpenAIProviderOptions(BaseModel):
         extra="forbid",
         populate_by_name=True,
     )
-    reasoningEffort: Annotated[
-        ReasoningEffort | None, Field(title="ReasoningEffort")
-    ] = None
+    reasoningEffort: Annotated[ReasoningEffort | None, Field(title="ReasoningEffort")] = None
     parallelToolCalls: bool | None = None
 
 
@@ -987,10 +983,7 @@ class RevealStageConfig(BaseModel):
     descriptions: StageTextConfig
     progress: StageProgressConfig
     items: list[
-        ChipRevealItem
-        | RankingRevealItem
-        | SurveyRevealItem
-        | MultiAssetAllocationRevealItem
+        ChipRevealItem | RankingRevealItem | SurveyRevealItem | MultiAssetAllocationRevealItem
     ]
 
 
@@ -1056,9 +1049,7 @@ class ChatStageConfig(BaseModel):
     discussions: list[DefaultChatDiscussion | CompareChatDiscussion]
 
 
-class RankingStageConfig(
-    RootModel[ItemRankingStageConfig | ParticipantRankingStageConfig]
-):
+class RankingStageConfig(RootModel[ItemRankingStageConfig | ParticipantRankingStageConfig]):
     model_config = ConfigDict(
         populate_by_name=True,
     )
@@ -1090,9 +1081,7 @@ class ModelGenerationConfig(BaseModel):
     topP: float | None = None
     frequencyPenalty: float | None = None
     presencePenalty: float | None = None
-    reasoningLevel: Annotated[
-        ReasoningLevel | None, Field(title="ReasoningLevel")
-    ] = None
+    reasoningLevel: Annotated[ReasoningLevel | None, Field(title="ReasoningLevel")] = None
     reasoningBudget: int | None = None
     includeReasoning: bool | None = None
     disableSafetyFilters: bool | None = None
@@ -1279,9 +1268,9 @@ class TextSurveyQuestion(BaseModel):
     id: Annotated[str, Field(min_length=1)]
     kind: Literal["text"] = "text"
     questionTitle: str
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
     minCharCount: float | None = None
     maxCharCount: float | None = None
 
@@ -1306,9 +1295,9 @@ class CheckSurveyQuestion(BaseModel):
     kind: Literal["check"] = "check"
     questionTitle: str
     isRequired: bool
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class MultipleChoiceSurveyQuestion(BaseModel):
@@ -1321,9 +1310,9 @@ class MultipleChoiceSurveyQuestion(BaseModel):
     questionTitle: str
     options: list[MultipleChoiceItem]
     correctAnswerId: str | None = None
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class ScaleSurveyQuestion(BaseModel):
@@ -1341,9 +1330,9 @@ class ScaleSurveyQuestion(BaseModel):
     middleText: str | None = None
     useSlider: bool | None = None
     stepSize: Annotated[float | None, Field(ge=1.0)] = None
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class SurveyStageConfig(BaseModel):
@@ -1377,10 +1366,7 @@ class TransferStageConfig(BaseModel):
     enableTimeout: bool
     timeoutSeconds: float
     autoTransferConfig: (
-        DefaultAutoTransferConfig
-        | SurveyAutoTransferConfig
-        | ConditionAutoTransferConfig
-        | None
+        DefaultAutoTransferConfig | SurveyAutoTransferConfig | ConditionAutoTransferConfig | None
     ) = None
 
 
@@ -1543,9 +1529,9 @@ class TextPromptItem(BaseModel):
     )
     type: Literal["TEXT"] = "TEXT"
     text: str
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class ProfileInfoPromptItem(BaseModel):
@@ -1554,9 +1540,9 @@ class ProfileInfoPromptItem(BaseModel):
         populate_by_name=True,
     )
     type: Literal["PROFILE_INFO"] = "PROFILE_INFO"
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class ParticipantInfoPromptItem(BaseModel):
@@ -1565,9 +1551,9 @@ class ParticipantInfoPromptItem(BaseModel):
         populate_by_name=True,
     )
     type: Literal["PARTICIPANT_INFO"] = "PARTICIPANT_INFO"
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class ParticipantChatInputPromptItem(BaseModel):
@@ -1576,9 +1562,9 @@ class ParticipantChatInputPromptItem(BaseModel):
         populate_by_name=True,
     )
     type: Literal["PARTICIPANT_CHAT_INPUT"] = "PARTICIPANT_CHAT_INPUT"
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class ProfileContextPromptItem(BaseModel):
@@ -1587,9 +1573,9 @@ class ProfileContextPromptItem(BaseModel):
         populate_by_name=True,
     )
     type: Literal["PROFILE_CONTEXT"] = "PROFILE_CONTEXT"
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class StageContextPromptItem(BaseModel):
@@ -1604,9 +1590,9 @@ class StageContextPromptItem(BaseModel):
     includeHelpText: bool
     includeStageDisplay: bool
     includeParticipantAnswers: bool
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class PromptItemGroup(BaseModel):
@@ -1626,9 +1612,9 @@ class PromptItemGroup(BaseModel):
         | PromptItemGroup
     ]
     shuffleConfig: ShuffleConfig | None = None
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class InitializationContextPromptItem(BaseModel):
@@ -1637,9 +1623,9 @@ class InitializationContextPromptItem(BaseModel):
         populate_by_name=True,
     )
     type: Literal["INITIALIZATION_CONTEXT"] = "INITIALIZATION_CONTEXT"
-    condition: Annotated[
-        ComparisonCondition | ConditionGroup | None, Field(title="Condition")
-    ] = None
+    condition: Annotated[ComparisonCondition | ConditionGroup | None, Field(title="Condition")] = (
+        None
+    )
 
 
 class StructuredOutputConfig(BaseModel):
@@ -1816,9 +1802,7 @@ class AgentAssistantTemplate(BaseModel):
     ]
 
 
-class JSONSchemaDefinition(
-    RootModel[String | Number | Integer | Boolean | Object | Array]
-):
+class JSONSchemaDefinition(RootModel[String | Number | Integer | Boolean | Object | Array]):
     model_config = ConfigDict(
         populate_by_name=True,
     )
