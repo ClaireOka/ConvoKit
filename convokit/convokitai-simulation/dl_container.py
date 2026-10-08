@@ -43,9 +43,8 @@ from typing import Optional
 __all__ = ["BackendContainer", "BackendContainerError", "DEFAULT_IMAGE", "FIRESTORE_PORT"]
 
 # Pin a version tag rather than :latest so notebooks keep working when the
-# backend image changes. Firestore listens on 8085 (only the old
-# claireoka/deliberate-lab-backend:v0.1 image used 8080).
-DEFAULT_IMAGE = "ghcr.io/cornellnlp/convoarena-backend:v0.3"
+# backend image changes. Firestore listens on 8085 (v0.1 used 8080).
+DEFAULT_IMAGE = "ghcr.io/claireoka/deliberate-lab-backend:v0.3"
 
 # Must match emulators.firestore.port in the image's firebase.docker.json.
 # Not 8080, because Colab's own runtime already listens there.

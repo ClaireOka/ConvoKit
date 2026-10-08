@@ -27,7 +27,7 @@ Two companion packages build on this format:
 Installation
 ------------
 
-``convokitai`` is part of ConvoKit (version 4.2 and later), so installing ConvoKit also installs
+``convokitai`` is part of ConvoKit (version 5.0.0 and later), so installing ConvoKit also installs
 it::
 
     pip install convokit
@@ -59,9 +59,9 @@ Quick start
     for support in corpus.iter_supports():
         print(support.private_assistant_id, support.text)
 
-AI speakers and private assistants with a `generation config`_ can also produce new messages with
-:doc:`convokit.genai <genai>` (the API key for the model's provider must be configured; see
-:doc:`GenAI <genai>`):
+AI speakers and private assistants with a :ref:`generation config <convokitai-generation-config>`
+can also produce new messages with :doc:`convokit.genai <genai>` (the API key for the model's
+provider must be configured; see :doc:`GenAI <genai>`):
 
 .. code-block:: python
 
@@ -74,181 +74,8 @@ AI speakers and private assistants with a `generation config`_ can also produce 
 Data format
 -----------
 
-The fields below are added to the standard :doc:`ConvoKit data format <data_format>`. In memory they
-are attributes of each object; on disk they are stored in its ``meta`` (``meta["is_ai"]``,
-``meta["ai_meta"]``, ...).
-
-Speaker
-^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 15 65
-
-   * - Field
-     - Type
-     - Description
-   * - ``is_ai``
-     - ``bool``
-     - Whether the speaker is known to be an AI agent.
-   * - ``ai_meta["config"]``
-     - ``dict``
-     - The `generation config`_ that produces this speaker's messages (used by ``Speaker.generate``).
-   * - ``ai_meta["role"]``
-     - ``str``
-     - The speaker's role in the conversation, e.g. ``"participant"`` or ``"public assistant"``
-       (a mediator who speaks in the conversation).
-
-Utterance
-^^^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 15 65
-
-   * - Field
-     - Type
-     - Description
-   * - ``ai_meta["config"]``
-     - ``dict``
-     - The generation config used to produce this message. Empty for human utterances.
-   * - ``ai_meta["supports"]``
-     - ``list[Support]``
-     - The supports sent in reply to this utterance (also available as ``Utterance.supports``).
-
-Other outputs of the model call can be stored in ``ai_meta`` as well, for example a mediator's
-stated reason for its message under ``"explanation"``.
-
-Conversation
-^^^^^^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 25 20 55
-
-   * - Field
-     - Type
-     - Description
-   * - ``ai_meta["alias"]``
-     - ``dict[str, str]``
-     - The name each speaker goes by in the conversation (e.g. ``"Bear"``), keyed by speaker ID.
-       Also available as ``Conversation.alias``.
-   * - ``ai_meta["private_assistants"]``
-     - ``list[PrivateAssistant]``
-     - The private assistants in this conversation (``Conversation.private_assistants``).
-   * - ``ai_meta["supports"]``
-     - ``list[Support]``
-     - Optional. Supports stored at the conversation level. ``Conversation.supports`` returns these
-       together with the supports of the private assistants and of the utterances.
-
-Corpus
-^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 15 65
-
-   * - Field
-     - Type
-     - Description
-   * - ``has_ai``
-     - ``bool``
-     - Whether any speaker in the corpus is AI. Computed from the speakers if not given.
-   * - ``ai_meta``
-     - ``dict``
-     - Free-form corpus-level metadata. For example, ConvoKit AI Simulation stores the simulation
-       configuration under ``"simulation_config"``.
-
-PrivateAssistant
-^^^^^^^^^^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 15 65
-
-   * - Field
-     - Type
-     - Description
-   * - ``id``
-     - ``str``
-     - Unique ID of the private assistant.
-   * - ``config``
-     - ``dict``
-     - The `generation config`_ that produces its supports (used by ``PrivateAssistant.generate``).
-   * - ``supports``
-     - ``list[Support]``
-     - The supports this assistant sent.
-   * - ``speakers``
-     - ``list[str]``
-     - IDs of the speakers who can see this assistant's supports.
-   * - ``conversation_id``
-     - ``str``
-     - ID of the conversation the assistant belongs to.
-
-Support
-^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 25 15 60
-
-   * - Field
-     - Type
-     - Description
-   * - ``id``
-     - ``str``
-     - Unique ID of the support.
-   * - ``text``
-     - ``str``
-     - The message the assistant sent.
-   * - ``reply_to``
-     - ``str``
-     - ID of the utterance the assisted speaker was replying to.
-   * - ``draft``
-     - ``str``
-     - What the assisted speaker had drafted so far (``""`` if nothing).
-   * - ``private_assistant_id``
-     - ``str``
-     - ID of the private assistant that sent the support.
-   * - ``timestamp``
-     - ``int`` or ``str``
-     - When the support was sent.
-
-Generation config
-^^^^^^^^^^^^^^^^^
-
-AI speakers and private assistants that can generate new messages carry a generation config:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 15 65
-
-   * - Key
-     - Type
-     - Description
-   * - ``prompt``
-     - ``str``
-     - The prompt that produces a message (required).
-   * - ``model``
-     - ``str``
-     - The model name, e.g. ``"gemini-2.5-flash"`` or ``"gpt-4o-mini"``.
-   * - ``provider``
-     - ``str``
-     - Optional. The ``convokit.genai`` provider: ``"gemini"``, ``"gpt"`` or ``"local"``. Inferred
-       from ``model`` if missing.
-   * - ``temperature``
-     - ``float``
-     - Optional. Sampling temperature.
-
-For example:
-
-.. code-block:: python
-
-    {
-        "prompt": "You help Goose phrase their replies politely.",
-        "model": "gemini-2.5-flash",
-        "temperature": 0.7,
-    }
+ConvoKit AI adds fields for AI speakers, private assistants and supports to the standard ConvoKit
+data format. See :ref:`ConvoKit AI extensions <convokitai-data-format>` in :doc:`Data Format <data_format>`.
 
 API reference
 -------------
