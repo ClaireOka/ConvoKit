@@ -20,7 +20,25 @@ Example usage:
 Installation
 ------------
 
-From the repository root, together with ConvoKit (which includes ``convokitai``)::
+.. important::
+
+   ConvoKit AI Evaluation requires **Python 3.12 or above**. This is newer than core ConvoKit, which
+   supports Python 3.10 and above, so an environment that works for ConvoKit may be too old for
+   this package. Check your version with ``python --version``, and if it is below 3.12, create a new
+   environment first, for example::
+
+       python3.12 -m venv .venv
+       source .venv/bin/activate
+
+   or with conda::
+
+       conda create -n convokitai python=3.12
+       conda activate convokitai
+
+   Installing into an older Python fails with an error that the package
+   ``requires a different Python``.
+
+Then, from the repository root, install it together with ConvoKit (which includes ``convokitai``)::
 
     python -m pip install -e . -e ./convokit/convokitai_evaluation
 

@@ -1,3 +1,5 @@
+# Requires Python 3.12+ (newer than core ConvoKit, which supports 3.10+). Use a Python 3.12+
+# environment before installing.
 # Install for local development (from the repository root), together with ConvoKit, which
 # includes the `convokitai` package:
 #   python -m pip install -e . -e ./convokit/convokitai_evaluation
@@ -8,7 +10,7 @@
 name = "convokitai-evaluation"
 version = "0.1.0"
 description = "Evaluation metrics for AI-mediated multi-party conversations: conversational information gain (CIG), claim-level consensus, and mediator redirection"
-requires-python = ">=3.12"
+requires-python = ">=3.12"  # stricter than convokit itself (>=3.10)
 dependencies = [
     # ConvoKit 5.0.0 is the first release that includes the `convokitai` package
     "convokit>=5.0.0",
