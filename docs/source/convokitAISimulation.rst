@@ -16,7 +16,7 @@ Simulations run either:
 
 * **locally** (the default): a ConvoArena backend runs on the Firebase emulators in a container
   on your machine, so no Firebase project is needed; or
-* **on your own ConvoArena deployment**, using an API key from its web interface.
+* **on your own ConvoArena deployment**, using an API key from its web interface. To set up your own ConvoArena deployement check out `<https://docs.google.com/document/d/1pRw3zydkPMAGVHDkWWwNOkJNDq0LVmfuSxHuntwp4yY/edit?tab=t.0>`
 
 Example usage: `simulation demo <https://github.com/CornellNLP/ConvoKit/blob/master/convokit/convokitai-simulation/simulation_demo.ipynb>`_.
 
