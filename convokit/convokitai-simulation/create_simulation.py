@@ -55,6 +55,7 @@ import tempfile
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -803,11 +804,11 @@ def _wait_for_first_message(client: dl.Client, experiment_id: str, timeout: floa
 
     The backend sends each chat's opening messages once, when its agents enter the chat, and
     never retries them; if they fail (e.g. because many model calls at once hit the Gemini rate
-    limit) the chat stays silent. Starting conversations one at a time keeps those calls apart.
+    limit) the chat stays silent. :class:`_Stagger` spaces out conversation starts to keep
+    those calls apart.
     """
     # exports get 3x the client timeout; keep each poll short so a slow backend can't stall this
     poll_client = dl.Client(base_url=client.base_url, api_key=client.api_key, timeout=10)
-    print(f"  waiting up to {timeout:.0f}s for the conversation to start...")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -880,17 +881,85 @@ def _heartbeat(log_path: Path, stop: threading.Event, interval: float = 5.0) -> 
         print(f"  ... still waiting on emulators ({elapsed}s elapsed, log is {size} bytes)")
 
 
+class _Stagger:
+    """Spaces out calls to :meth:`wait` across threads so that consecutive calls return at least
+    ``interval`` seconds apart."""
+
+    def __init__(self, interval: float):
+        self.interval = interval
+        self._lock = threading.Lock()
+        self._next = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            start = max(now, self._next)
+            self._next = start + self.interval
+        time.sleep(start - now)
+
+
+def _start_conversation(
+    backend: LocalBackend | FirebaseBackend,
+    template: dict,
+    cohort_config: dict,
+    agents: list[dict],
+    pairing_id: str | None,
+    topic: str,
+    stagger: _Stagger,
+) -> tuple[str, str]:
+    """Create one conversation's experiment and cohort, add its agents, and wait for its first
+    message. Runs in a worker thread of :func:`create_simulation`.
+
+    :return: the experiment ID and cohort ID
+    """
+    stagger.wait()
+    client = backend.client()  # requests sessions aren't thread-safe, so one client per thread
+    result = client.create_simulation(
+        template=template,
+        num_cohorts=1,
+        cohort_names=[f"[convokitai-sim] {pairing_id or 'pairing'}"],
+        cohort_participant_config=[dl.CohortParticipantConfig(**cohort_config)],
+    )
+    experiment_id = result["experiment"]["experiment"]["id"]
+    cohort = result["cohorts"][0]
+    cohort_id = cohort["cohort"]["id"] if "cohort" in cohort else cohort["id"]
+    # each conversation's lines are printed together, since several run at once
+    lines = [
+        f"created experiment {experiment_id}, cohort {cohort_id} (pairing {pairing_id}: {topic})"
+    ]
+
+    for joined, agent in enumerate(agents, start=1):
+        _add_agent_to_cohort(backend, experiment_id, cohort_id, agent)
+        lines.append(f"  {agent['persona']['id']} joined")
+        if joined < len(agents) and not _wait_for_agents_in_chat(client, experiment_id, joined):
+            lines.append(
+                f"  WARNING: {agent['persona']['id']} hasn't reached the chat yet; adding the next agent anyway"
+            )
+
+    if _wait_for_first_message(client, experiment_id):
+        lines.append("  conversation started")
+    else:
+        lines.append("  WARNING: no chat message yet; it may never start:")
+        lines += _failed_model_calls(client, experiment_id)
+    print("\n".join(lines))
+    return experiment_id, cohort_id
+
+
 def create_simulation(
     backend: LocalBackend | FirebaseBackend,
     sim_yaml: str | Path | dict,
     wait_timeout: float | None = None,
+    max_concurrent: int = 4,
+    start_interval: float = 5.0,
 ) -> Corpus:
     """Run every conversation described by the simulation YAML on a running backend and wait
     until they all finish.
 
-    Each pairing and block combination is created as its own experiment with one cohort. The
-    agents are added to the cohort one at a time, and each conversation is started before the
-    next one is created. Progress and warnings are printed.
+    Each pairing and block combination is created as its own experiment with one cohort.
+    Conversations are set up in parallel, up to ``max_concurrent`` at a time, with their starts
+    spaced ``start_interval`` seconds apart so that their opening model calls don't all hit the
+    Gemini rate limit at once. Within a conversation, the agents are added to the cohort one at
+    a time. Progress and warnings are printed.
 
     Example::
 
@@ -905,12 +974,17 @@ def create_simulation(
     :param wait_timeout: seconds to wait for the conversations to finish before keeping them as
         they stand. Defaults to ``max_time`` plus 5 minutes (or no limit if ``max_time`` isn't
         set).
+    :param max_concurrent: how many conversations to set up at the same time. Set to 1 to set
+        them up one after another.
+    :param start_interval: minimum seconds between the starts of two conversations' setup.
+        Raise it if conversations fail to start because of Gemini rate limits.
     :return: a ``convokitai`` Corpus with one Conversation per pairing and block combination
         that has chat messages. Each Conversation's meta has the pairing ID, experiment ID,
         blocks shown, and whether it completed; the corpus's
         ``ai_meta["simulation_config"]`` holds the parsed simulation YAML.
     :raises ValueError: if the simulation YAML is invalid, or no conversation has any chat
         messages
+    :raises RuntimeError: if no conversation could be set up
     """
     config = load_simulation_config(sim_yaml)
     client = backend.client()
@@ -918,41 +992,42 @@ def create_simulation(
         # time for the agents to join and for the last turns to wrap up
         wait_timeout = config["max_time"] * 60 + 300
 
+    # build every template first, so an invalid YAML fails before any experiment is created
+    jobs = [
+        (*_experiment_template(config, pairing, blocks), pairing.get("id"), blocks)
+        for pairing in config["pairings"]
+        for blocks in _block_variants(config)
+    ]
+    print(
+        f"setting up {len(jobs)} conversation(s), up to {max_concurrent} at a time "
+        f"(each takes up to a few minutes to start)..."
+    )
+    stagger = _Stagger(start_interval)
+    with ThreadPoolExecutor(max_workers=max(1, max_concurrent)) as pool:
+        futures = [
+            pool.submit(
+                _start_conversation,
+                backend,
+                template,
+                cohort_config,
+                agents,
+                pairing_id,
+                "; ".join(block["description"] for block in blocks),
+                stagger,
+            )
+            for template, cohort_config, agents, pairing_id, blocks in jobs
+        ]
     runs = []
-    for pairing in config["pairings"]:
-        for blocks in _block_variants(config):
-            template, cohort_config, agents = _experiment_template(config, pairing, blocks)
-            result = client.create_simulation(
-                template=template,
-                num_cohorts=1,
-                cohort_names=[f"[convokitai-sim] {pairing.get('id', 'pairing')}"],
-                cohort_participant_config=[dl.CohortParticipantConfig(**cohort_config)],
-            )
-            experiment_id = result["experiment"]["experiment"]["id"]
-            cohort = result["cohorts"][0]
-            cohort_id = cohort["cohort"]["id"] if "cohort" in cohort else cohort["id"]
+    for future, (_, _, _, pairing_id, blocks) in zip(futures, jobs):
+        try:
+            experiment_id, cohort_id = future.result()
+        except Exception as exc:  # keep the conversations that did start
             topic = "; ".join(block["description"] for block in blocks)
-            print(
-                f"created experiment {experiment_id}, cohort {cohort_id} (pairing {pairing.get('id')}: {topic})"
-            )
-
-            for joined, agent in enumerate(agents, start=1):
-                _add_agent_to_cohort(backend, experiment_id, cohort_id, agent)
-                print(f"  {agent['persona']['id']} joined")
-                if joined < len(agents) and not _wait_for_agents_in_chat(
-                    client, experiment_id, joined
-                ):
-                    print(
-                        f"  WARNING: {agent['persona']['id']} hasn't reached the chat yet; adding the next agent anyway"
-                    )
-            runs.append((experiment_id, cohort_id, pairing.get("id")))
-
-            if _wait_for_first_message(client, experiment_id):
-                print("  conversation started")
-            else:
-                print("  WARNING: no chat message yet; it may never start:")
-                for line in _failed_model_calls(client, experiment_id):
-                    print(line)
+            print(f"WARNING: setting up pairing {pairing_id} ({topic}) failed: {exc}")
+            continue
+        runs.append((experiment_id, cohort_id, pairing_id))
+    if not runs:
+        raise RuntimeError("no conversation could be set up; see the warnings above")
 
     print(f"{len(runs)} conversation(s) running, waiting for them to finish...")
     exports, unfinished = _wait_for_exports(client, [run[0] for run in runs], wait_timeout)

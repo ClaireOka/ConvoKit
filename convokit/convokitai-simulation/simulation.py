@@ -21,6 +21,8 @@ def simulate(
     dl_api_key: str | None = None,
     backend: FirebaseBackend | None = None,
     wait_timeout: float | None = None,
+    max_concurrent: int = 4,
+    start_interval: float = 5.0,
 ) -> Corpus:
     """Run a simulation and return its conversations as a ``convokitai`` Corpus.
 
@@ -54,6 +56,11 @@ def simulate(
     :param wait_timeout: seconds to wait for the conversations to finish before
         keeping them as they stand. Defaults to the YAML's ``max_time`` plus 5
         minutes.
+    :param max_concurrent: how many conversations to set up at the same time
+        (see :func:`create_simulation.create_simulation`).
+    :param start_interval: minimum seconds between the starts of two
+        conversations' setup; raise it if Gemini rate limits keep
+        conversations from starting.
     :return: a Corpus with one Conversation per pairing and block combination
         (see :func:`create_simulation.create_simulation`).
     :raises ValueError: if ``sim_yaml`` is missing or invalid, or the arguments
@@ -80,7 +87,7 @@ def simulate(
                 "gemini_api_key is only used with the local backend; on your own "
                 "deployment, save the Gemini key in the web UI's Settings instead"
             )
-        return create_simulation(backend, config, wait_timeout)
+        return create_simulation(backend, config, wait_timeout, max_concurrent, start_interval)
 
     if not gemini_api_key:
         raise ValueError("gemini_api_key is required for the local backend")
@@ -93,4 +100,4 @@ def simulate(
             startup_timeout=600,
         ) as local:
             _seed_gemini_api_key(local, gemini_api_key)
-            return create_simulation(local, config, wait_timeout)
+            return create_simulation(local, config, wait_timeout, max_concurrent, start_interval)
