@@ -1,9 +1,8 @@
 ConvoKit AI Simulation
 ======================
 
-ConvoKit AI Simulation runs conversations between AI agents on ConvoArena, a platform for
-online conversation experiments with humans and AI agents built on
-`Deliberate Lab <https://github.com/PAIR-code/deliberate-lab>`_, and returns them as a :doc:`ConvoKit AI <convokitai>`
+ConvoKit AI Simulation runs conversations between AI agents on `ConvoArena <https://github.com/CornellNLP/ConvoArena>`, a platform for
+online conversation experiments with humans and AI agents built on, and returns them as a :doc:`ConvoKit AI <convokitai>`
 corpus. The conversations can include an AI mediator that speaks in the chat and private assistants
 that privately help individual participants.
 
